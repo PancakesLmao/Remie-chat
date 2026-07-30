@@ -1,0 +1,436 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="UTF-8">
+<title>Remie — draft</title>
+<style>
+  :root{
+    --pink-deep:#E88FA6;
+    --pink-mid:#F6B9C6;
+    --pink-pale:#FBE0E4;
+    --lav:#C6C7EE;
+    --lav-deep:#8E8FCB;
+    --cream:#FFF8F6;
+    --ink:#3A2E3C;
+    --line:#3A2E3C;
+    --shadow: 0 10px 30px rgba(150,90,110,.18);
+  }
+  *{box-sizing:border-box;}
+  html,body{
+    height:100%; margin:0;
+    background:
+      radial-gradient(circle at 20% 15%, #fdf0f2 0%, transparent 45%),
+      radial-gradient(circle at 80% 85%, #eceafb 0%, transparent 45%),
+      #f6f2f6;
+    font-family:'Segoe UI', 'Helvetica Neue', Arial, sans-serif;
+    color:var(--ink);
+    overflow:hidden;
+  }
+  /* backdrop is just a demo stage, not part of the widget */
+  .stage-label{
+    position:fixed; top:18px; left:22px;
+    font-size:12px; letter-spacing:.14em; text-transform:uppercase;
+    color:#b39aa8; font-weight:600;
+  }
+
+  /* ============ WIDGET ROOT ============ */
+  #remie-root{
+    position:fixed;
+    top:120px; left:120px;
+    z-index:999;
+    user-select:none;
+  }
+
+  /* ---------- ICON MODE ---------- */
+  #icon-mode{
+    width:76px; height:76px;
+    border-radius:50%;
+    background:var(--cream);
+    border:2.5px solid var(--line);
+    box-shadow:var(--shadow);
+    display:flex; align-items:center; justify-content:center;
+    cursor:grab;
+    position:relative;
+    overflow:hidden;
+  }
+  #icon-mode:active{cursor:grabbing;}
+  #icon-mode img{
+    width:112%; height:112%;
+    object-fit:contain;
+    position:absolute;
+    opacity:0;
+    transition:opacity .35s ease;
+  }
+  #icon-mode img.active{opacity:1;}
+  #icon-mode .expand-hit{
+    position:absolute; inset:0; border-radius:50%;
+  }
+  .icon-ring{
+    position:absolute; inset:-6px;
+    border-radius:50%;
+    border:2px dashed var(--lav-deep);
+    opacity:0;
+    animation:spin 6s linear infinite;
+    pointer-events:none;
+  }
+  #icon-mode.state-thinking .icon-ring,
+  #icon-mode.state-generating .icon-ring{ opacity:.55; }
+  @keyframes spin{ to{ transform:rotate(360deg);} }
+
+  /* small status dot on icon */
+  .status-dot{
+    position:absolute; bottom:2px; right:2px;
+    width:14px; height:14px; border-radius:50%;
+    border:2px solid var(--cream);
+    background:var(--lav);
+    transition:background .3s ease;
+  }
+  .status-dot.waiting{background:#C9C7EA;}
+  .status-dot.typing{background:#F6B9C6;}
+  .status-dot.thinking{background:#E88FA6;}
+  .status-dot.generating{background:#8E8FCB;}
+  .status-dot.complete{background:#8fd6a8;}
+
+  /* ---------- CHAT MODE ---------- */
+  #chat-mode{
+    display:none;
+    width:320px;
+    height:420px;
+    background:var(--cream);
+    border:2.5px solid var(--line);
+    border-radius:22px;
+    box-shadow:var(--shadow);
+    flex-direction:column;
+    overflow:hidden;
+    transition:width .25s ease, height .25s ease, border-radius .25s ease;
+  }
+  #chat-mode.full{
+    width:min(560px,92vw);
+    height:min(720px,88vh);
+    border-radius:18px;
+  }
+
+  /* drag handle header */
+  #chat-header{
+    display:flex; align-items:center; gap:10px;
+    padding:10px 12px;
+    background:linear-gradient(135deg,var(--pink-pale),#f1eefb);
+    border-bottom:2px solid var(--line);
+    cursor:grab;
+  }
+  #chat-header:active{cursor:grabbing;}
+  #chat-avatar{
+    width:44px; height:44px; border-radius:50%;
+    background:#fff;
+    border:2px solid var(--line);
+    overflow:hidden;
+    position:relative;
+    flex:none;
+  }
+  #chat-avatar img{
+    width:112%; height:112%; object-fit:contain;
+    position:absolute; opacity:0;
+    transition:opacity .35s ease;
+  }
+  #chat-avatar img.active{opacity:1;}
+  #chat-title{flex:1; min-width:0;}
+  #chat-title .name{font-weight:700; font-size:14px;}
+  #chat-title .status-text{
+    font-size:11.5px; color:#8b7a86; font-weight:600;
+    display:flex; align-items:center; gap:5px;
+  }
+  #chat-title .status-text .dot{
+    width:6px;height:6px;border-radius:50%;background:var(--lav);
+    transition:background .3s ease;
+  }
+  .header-btn{
+    width:28px; height:28px; border-radius:9px;
+    border:2px solid var(--line); background:#fff;
+    display:flex; align-items:center; justify-content:center;
+    cursor:pointer; font-size:13px; flex:none;
+    transition:transform .15s ease, background .15s ease;
+  }
+  .header-btn:hover{ background:var(--pink-pale); transform:translateY(-1px); }
+
+  /* messages */
+  #chat-body{
+    flex:1; overflow-y:auto;
+    padding:14px 12px;
+    display:flex; flex-direction:column; gap:10px;
+    scrollbar-width:thin;
+  }
+  .msg{
+    max-width:80%;
+    padding:9px 12px;
+    border-radius:14px;
+    font-size:13.5px; line-height:1.4;
+    border:2px solid var(--line);
+    animation:pop .18s ease;
+  }
+  @keyframes pop{ from{opacity:0; transform:translateY(4px) scale(.97);} to{opacity:1; transform:none;} }
+  .msg.user{
+    align-self:flex-end;
+    background:var(--lav);
+    border-color:var(--lav-deep);
+    border-bottom-right-radius:4px;
+  }
+  .msg.ai{
+    align-self:flex-start;
+    background:var(--pink-pale);
+    border-bottom-left-radius:4px;
+  }
+  .msg.ai.typing-msg{
+    display:flex; gap:4px; align-items:center; padding:11px 14px;
+  }
+  .typing-msg span{
+    width:6px;height:6px;border-radius:50%;background:var(--pink-deep);
+    animation:bounce 1.1s infinite ease-in-out;
+  }
+  .typing-msg span:nth-child(2){animation-delay:.15s;}
+  .typing-msg span:nth-child(3){animation-delay:.3s;}
+  @keyframes bounce{0%,60%,100%{transform:translateY(0);opacity:.5;} 30%{transform:translateY(-4px);opacity:1;}}
+
+  /* footer / input */
+  #chat-footer{
+    display:flex; align-items:center; gap:8px;
+    padding:10px 12px;
+    border-top:2px solid var(--line);
+    background:#fff;
+  }
+  #chat-input{
+    flex:1;
+    border:2px solid var(--line);
+    border-radius:12px;
+    padding:9px 12px;
+    font-size:13.5px;
+    outline:none;
+    background:var(--cream);
+  }
+  #chat-input:focus{ border-color:var(--pink-deep); }
+  #send-btn{
+    width:36px; height:36px; border-radius:12px;
+    border:2px solid var(--line);
+    background:var(--pink-mid);
+    display:flex; align-items:center; justify-content:center;
+    cursor:pointer; font-size:15px;
+    transition:transform .12s ease;
+  }
+  #send-btn:hover{ transform:translateY(-1px) scale(1.03); }
+  #send-btn:active{ transform:scale(.95); }
+
+  /* demo controls (not part of widget, just to preview states) */
+  #demo-controls{
+    position:fixed; bottom:20px; left:20px;
+    background:#fff; border:2px solid var(--line);
+    border-radius:14px; padding:10px; display:flex; gap:6px;
+    box-shadow:var(--shadow); z-index:1000; flex-wrap:wrap; max-width:300px;
+  }
+  #demo-controls button{
+    border:2px solid var(--line); background:var(--pink-pale);
+    border-radius:9px; padding:6px 9px; font-size:11px; cursor:pointer;
+    font-weight:600;
+  }
+  #demo-controls button:hover{ background:var(--pink-mid); }
+  #demo-controls .lbl{ width:100%; font-size:10px; color:#a7899a; letter-spacing:.08em; text-transform:uppercase; margin-bottom:2px;}
+</style>
+</head>
+<body>
+
+<div class="stage-label">Remie — prototype stage (drag the widget around)</div>
+
+<div id="remie-root">
+
+  <!-- ICON MODE -->
+  <div id="icon-mode" class="state-waiting">
+    <div class="icon-ring"></div>
+    <img data-state="waiting_input" src="assets/remie_waiting_input.gif" class="active">
+    <img data-state="typing" src="assets/user_typing.gif">
+    <img data-state="thinking" src="assets/remie_thinking.gif">
+    <img data-state="generating" src="assets/remie_gen.gif">
+    <img data-state="complete" src="assets/remie_complete.gif">
+    <div class="status-dot waiting"></div>
+    <div class="expand-hit" title="Click to open chat"></div>
+  </div>
+
+  <!-- CHAT MODE -->
+  <div id="chat-mode">
+    <div id="chat-header">
+      <div id="chat-avatar">
+        <img data-state="waiting_input" src="assets/remie_waiting_input.gif" class="active">
+        <img data-state="typing" src="assets/user_typing.gif">
+        <img data-state="thinking" src="assets/remie_thinking.gif">
+        <img data-state="generating" src="assets/remie_gen.gif">
+        <img data-state="complete" src="assets/remie_complete.gif">
+      </div>
+      <div id="chat-title">
+        <div class="name">Remie</div>
+        <div class="status-text"><span class="dot"></span><span id="status-label">waiting for you</span></div>
+      </div>
+      <div class="header-btn" id="expand-btn" title="Toggle fullscreen">⤢</div>
+      <div class="header-btn" id="minimize-btn" title="Minimize to icon">—</div>
+    </div>
+    <div id="chat-body">
+      <div class="msg ai">hii! I'm Remie 🌸 ask me anything~</div>
+    </div>
+    <div id="chat-footer">
+      <input id="chat-input" type="text" placeholder="Type a message...">
+      <div id="send-btn">➤</div>
+    </div>
+  </div>
+
+</div>
+
+<!-- DEMO CONTROLS: lets you preview state transitions; delete in production -->
+<div id="demo-controls">
+  <div class="lbl">Preview states</div>
+  <button data-state="waiting_input">Waiting</button>
+  <button data-state="typing">User typing</button>
+  <button data-state="thinking">AI thinking</button>
+  <button data-state="generating">AI generating</button>
+  <button data-state="complete">Complete</button>
+  <button id="toggle-mode-btn" style="background:var(--lav);">Toggle icon/chat</button>
+</div>
+
+<script>
+(function(){
+  const root = document.getElementById('remie-root');
+  const iconMode = document.getElementById('icon-mode');
+  const chatMode = document.getElementById('chat-mode');
+  const statusLabel = document.getElementById('status-label');
+  const statusDot = iconMode.querySelector('.status-dot');
+  const headerDot = document.querySelector('#chat-title .dot');
+  const chatBody = document.getElementById('chat-body');
+  const input = document.getElementById('chat-input');
+  const sendBtn = document.getElementById('send-btn');
+  const expandBtn = document.getElementById('expand-btn');
+  const minimizeBtn = document.getElementById('minimize-btn');
+  const toggleModeBtn = document.getElementById('toggle-mode-btn');
+
+  const STATE_LABELS = {
+    waiting_input: 'waiting for you',
+    typing: 'listening...',
+    thinking: 'thinking...',
+    generating: 'writing reply...',
+    complete: 'done!'
+  };
+
+  let currentState = 'waiting_input';
+  let mode = 'chat'; // 'chat' | 'icon'
+  let isFull = false;
+
+  function setState(state){
+    currentState = state;
+    // crossfade gifs
+    document.querySelectorAll('#icon-mode img, #chat-avatar img').forEach(img=>{
+      img.classList.toggle('active', img.dataset.state === state);
+    });
+    iconMode.className = 'state-' + state;
+    statusLabel.textContent = STATE_LABELS[state];
+    statusDot.className = 'status-dot ' + (state === 'waiting_input' ? 'waiting' : state === 'typing' ? 'typing' : state);
+    headerDot.style.background = getComputedStyle(statusDot).backgroundColor;
+  }
+
+  // ---- state auto-detection hooks ----
+  // Real app: wire these to actual keyboard listeners / AI SDK events.
+  let typingTimeout;
+  input.addEventListener('input', ()=>{
+    setState('typing');
+    clearTimeout(typingTimeout);
+    typingTimeout = setTimeout(()=> setState('waiting_input'), 1200);
+  });
+  input.addEventListener('focus', ()=>{ if(currentState==='waiting_input') setState('waiting_input'); });
+
+  function sendMessage(){
+    const text = input.value.trim();
+    if(!text) return;
+    const userMsg = document.createElement('div');
+    userMsg.className = 'msg user';
+    userMsg.textContent = text;
+    chatBody.appendChild(userMsg);
+    input.value = '';
+    chatBody.scrollTop = chatBody.scrollHeight;
+
+    setState('thinking');
+    const typingBubble = document.createElement('div');
+    typingBubble.className = 'msg ai typing-msg';
+    typingBubble.innerHTML = '<span></span><span></span><span></span>';
+    setTimeout(()=>{
+      chatBody.appendChild(typingBubble);
+      chatBody.scrollTop = chatBody.scrollHeight;
+      setState('generating');
+    }, 900);
+
+    setTimeout(()=>{
+      typingBubble.remove();
+      const aiMsg = document.createElement('div');
+      aiMsg.className = 'msg ai';
+      aiMsg.textContent = "here's a placeholder reply — wire this up to your model!";
+      chatBody.appendChild(aiMsg);
+      chatBody.scrollTop = chatBody.scrollHeight;
+      setState('complete');
+      setTimeout(()=> setState('waiting_input'), 1500);
+    }, 2000);
+  }
+  sendBtn.addEventListener('click', sendMessage);
+  input.addEventListener('keydown', e=>{ if(e.key==='Enter') sendMessage(); });
+
+  // ---- mode toggle ----
+  function showChat(){
+    mode='chat';
+    iconMode.style.display='none';
+    chatMode.style.display='flex';
+  }
+  function showIcon(){
+    mode='icon';
+    chatMode.style.display='none';
+    iconMode.style.display='flex';
+  }
+  iconMode.querySelector('.expand-hit').addEventListener('click', showChat);
+  minimizeBtn.addEventListener('click', showIcon);
+  toggleModeBtn.addEventListener('click', ()=> mode==='chat' ? showIcon() : showChat());
+
+  expandBtn.addEventListener('click', ()=>{
+    isFull = !isFull;
+    chatMode.classList.toggle('full', isFull);
+  });
+
+  // demo state buttons
+  document.querySelectorAll('#demo-controls button[data-state]').forEach(btn=>{
+    btn.addEventListener('click', ()=> setState(btn.dataset.state));
+  });
+
+  // ---- drag and drop (works for both header and icon) ----
+  function makeDraggable(handle){
+    let dragging=false, offX=0, offY=0;
+    handle.addEventListener('mousedown', e=>{
+      // ignore drag start on buttons
+      if(e.target.closest('.header-btn') || e.target.closest('.expand-hit')) {
+        // allow expand-hit click but not drag conflict; still permit drag
+      }
+      dragging=true;
+      const rect = root.getBoundingClientRect();
+      offX = e.clientX - rect.left;
+      offY = e.clientY - rect.top;
+      document.body.style.userSelect='none';
+    });
+    window.addEventListener('mousemove', e=>{
+      if(!dragging) return;
+      root.style.left = (e.clientX - offX) + 'px';
+      root.style.top = (e.clientY - offY) + 'px';
+    });
+    window.addEventListener('mouseup', ()=>{
+      dragging=false;
+      document.body.style.userSelect='';
+    });
+  }
+  makeDraggable(document.getElementById('chat-header'));
+  makeDraggable(iconMode);
+
+  // init
+  setState('waiting_input');
+  showChat();
+})();
+</script>
+
+</body>
+</html>
