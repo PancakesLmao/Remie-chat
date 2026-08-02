@@ -1,6 +1,8 @@
 import { useState, useEffect, useRef } from "preact/hooks";
-import { getCurrentWindow, LogicalSize } from "@tauri-apps/api/window";
+import { getCurrentWindow, LogicalSize, LogicalPosition } from "@tauri-apps/api/window";
 import { listen } from "@tauri-apps/api/event";
+import { invoke } from "@tauri-apps/api/core";
+import { Settings, Maximize2, Minimize2, Minus } from "lucide-preact";
 import "./App.css";
 
 // Assets
@@ -8,7 +10,7 @@ import remieGen from "./assets/remie_gen.gif";
 import remieComplete from "./assets/remie_complete.gif";
 import remieThinking from "./assets/remie_thinking.gif";
 import remieWaiting from "./assets/remie_waiting_input.gif";
-import userTyping from "./assets/user_typing.gif"; // assuming it exists
+import userTyping from "./assets/user_typing.gif";
 
 const STATE_LABELS = {
   waiting_input: 'waiting for you',
@@ -18,13 +20,47 @@ const STATE_LABELS = {
   complete: 'done!'
 };
 
-function App() {
+// Detect which page this window should render
+const isSettingsPage = new URLSearchParams(window.location.search).get('page') === 'settings';
+
+// ─── Settings Page ────────────────────────────────────────────────────────────
+function SettingsPage() {
+  const [userName, setUserName] = useState("Manager");
+
+  const handleClose = async () => {
+    await getCurrentWindow().close();
+  };
+
+  return (
+    <div id="settings-root">
+      <div class="settings-view standalone">
+        <div class="settings-body">
+          <div class="settings-section-title">Profile</div>
+          <div class="setting-item">
+            <label>User Name</label>
+            <input
+              type="text"
+              value={userName}
+              onInput={(e) => setUserName(e.target.value)}
+              placeholder="Enter your name..."
+            />
+          </div>
+        </div>
+      </div>
+    </div>
+  );
+}
+
+// ─── Chat App ─────────────────────────────────────────────────────────────────
+function ChatApp() {
   const [mode, setMode] = useState("chatbox"); // 'chatbox' or 'widget'
-  const [aiState, setAiState] = useState("waiting_input"); // 'waiting_input', 'typing', 'thinking', 'generating', 'complete'
+  const [aiState, setAiState] = useState("waiting_input");
   const [input, setInput] = useState("");
   const [messages, setMessages] = useState([
     { role: "ai", text: "hi Manager, It's Remie~" }
   ]);
+  const [userName] = useState("Manager");
+  const [isFullscreen, setIsFullscreen] = useState(false);
   const chatAreaRef = useRef(null);
 
   // Auto scroll
@@ -34,6 +70,25 @@ function App() {
     }
   }, [messages, aiState]);
 
+  const resizeAnchored = async (win, width, height) => {
+    try {
+      const scaleFactor = await win.scaleFactor();
+      const currentSize = await win.outerSize();
+      const currentPos = await win.outerPosition();
+      const logicalSize = currentSize.toLogical(scaleFactor);
+      const logicalPos = currentPos.toLogical(scaleFactor);
+      const heightDiff = height - logicalSize.height;
+      const widthDiff = width - logicalSize.width;
+      await win.setSize(new LogicalSize(width, height));
+      await win.setPosition(new LogicalPosition(
+        logicalPos.x - (widthDiff / 2),
+        logicalPos.y - heightDiff
+      ));
+    } catch (err) {
+      console.error("Failed to resize anchored", err);
+    }
+  };
+
   // Window resizing based on mode
   useEffect(() => {
     const resizeWindow = async () => {
@@ -41,10 +96,9 @@ function App() {
         const win = getCurrentWindow();
         await win.setAlwaysOnTop(true);
         if (mode === "widget") {
-          await win.setFullscreen(false);
-          await win.setSize(new LogicalSize(200, 200)); // 25% bigger to fit the 130px icon + ring + shadow
+          await resizeAnchored(win, 200, 200);
         } else {
-          await win.setSize(new LogicalSize(320, 420));
+          await resizeAnchored(win, 360, 420);
         }
       } catch (err) {
         console.error("Failed to resize window", err);
@@ -57,31 +111,24 @@ function App() {
   const typingTimeoutRef = useRef(null);
   useEffect(() => {
     let unlisten;
-    
-    const setupListener = async () => {
+    const setup = async () => {
       unlisten = await listen("global-keypress", () => {
         setAiState(prev => {
-          if (prev === "waiting_input" || prev === "typing") {
-            return "typing";
-          }
-          return prev; // don't interrupt generating/thinking
+          if (prev === "waiting_input" || prev === "typing") return "typing";
+          return prev;
         });
-        
         if (typingTimeoutRef.current) clearTimeout(typingTimeoutRef.current);
         typingTimeoutRef.current = setTimeout(() => {
           setAiState(prev => prev === "typing" ? "waiting_input" : prev);
         }, 1200);
       });
     };
-    
-    setupListener();
+    setup();
     return () => {
       if (unlisten) unlisten();
       if (typingTimeoutRef.current) clearTimeout(typingTimeoutRef.current);
     };
   }, []);
-
-  const [isFullscreen, setIsFullscreen] = useState(false);
 
   const getIcon = () => {
     switch (aiState) {
@@ -89,7 +136,6 @@ function App() {
       case "thinking": return remieThinking;
       case "generating": return remieGen;
       case "complete": return remieComplete;
-      case "waiting_input":
       default: return remieWaiting;
     }
   };
@@ -106,25 +152,15 @@ function App() {
   const handleSubmit = async (e) => {
     e.preventDefault();
     if (!input.trim()) return;
-
     setMessages(prev => [...prev, { role: "user", text: input }]);
     setInput("");
-    
     setAiState("thinking");
-    
     setTimeout(() => {
       setAiState("generating");
-      
       setTimeout(() => {
-        setMessages(prev => [
-          ...prev, 
-          { role: "ai", text: "here's a placeholder reply — wire this up to your model!" }
-        ]);
+        setMessages(prev => [...prev, { role: "ai", text: "here's a placeholder reply — wire this up to your model!" }]);
         setAiState("complete");
-        
-        setTimeout(() => {
-          setAiState("waiting_input");
-        }, 1500);
+        setTimeout(() => setAiState("waiting_input"), 1500);
       }, 2000);
     }, 900);
   };
@@ -133,25 +169,31 @@ function App() {
     const win = getCurrentWindow();
     const full = !isFullscreen;
     if (full) {
-      await win.setSize(new LogicalSize(560, 720));
+      await resizeAnchored(win, 600, 720);
     } else {
-      await win.setSize(new LogicalSize(320, 420));
+      await resizeAnchored(win, 360, 420);
     }
     setIsFullscreen(full);
   };
 
-  // The status dot class relies on aiState matching 'waiting', 'typing', etc.
+  const toIconMode = () => {
+    setIsFullscreen(false);
+    setMode("widget");
+  };
+
   const getStatusDotClass = () => {
     if (aiState === 'waiting_input') return 'waiting';
     return aiState;
   };
 
+  const openSettings = () => invoke('open_settings_window');
+
   return (
     <div id="remie-root">
       {mode === "widget" ? (
-        <div 
-          id="icon-mode" 
-          class={`state-${aiState}`} 
+        <div
+          id="icon-mode"
+          class={`state-${aiState}`}
           data-tauri-drag-region
           onClick={() => setMode("chatbox")}
           title="Click to open chat"
@@ -162,19 +204,28 @@ function App() {
         </div>
       ) : (
         <div id="chat-mode" class={isFullscreen ? 'full' : ''}>
-          
+
+          {/* Mascot side panel — full mode only */}
           <div class="mascot-side-panel" data-tauri-drag-region onPointerDown={(e) => {
-            if (e.button === 0) getCurrentWindow().startDragging();
+            if (e.button === 0 && !e.target.closest('.settings-bar')) getCurrentWindow().startDragging();
           }}>
             <img src={getIcon()} class="active" data-tauri-drag-region />
+            {isFullscreen && (
+              <div class="settings-bar" onClick={openSettings}>
+                <span class="user-name">{userName}</span>
+                <div class="settings-gear" title="Settings">
+                  <Settings size={20} />
+                </div>
+              </div>
+            )}
           </div>
 
+          {/* Main chat panel */}
           <div class="chat-content-panel">
-            <div 
-              id="chat-header" 
+            <div
+              id="chat-header"
               data-tauri-drag-region
               onPointerDown={(e) => {
-                // only start drag if we didn't click a button
                 if (e.button === 0 && !e.target.closest('.header-btn')) {
                   getCurrentWindow().startDragging();
                 }
@@ -184,21 +235,25 @@ function App() {
                 <img src={getIcon()} class="active" />
               </div>
               <div id="chat-title">
-                <div class="name">Remie</div>
+                <div class="name">{userName}</div>
                 <div class="status-text">
                   <span class="dot" style={{ background: `var(--${getStatusDotClass() === 'waiting' ? 'lav' : getStatusDotClass() === 'typing' ? 'pink-mid' : getStatusDotClass() === 'thinking' ? 'pink-deep' : getStatusDotClass() === 'generating' ? 'lav-deep' : 'complete'})` }}></span>
                   <span id="status-label">{STATE_LABELS[aiState]}</span>
                 </div>
               </div>
-              <div class="header-btn" title="Toggle fullscreen" onClick={toggleFullscreen}>⤢</div>
-              <div class="header-btn" title="Minimize to icon" onClick={() => { setIsFullscreen(false); setMode("widget"); }}>—</div>
+
+              {/* 2 buttons: mode toggle + icon mode */}
+              <div class="header-btn" title={isFullscreen ? "Mini chat" : "Full chat"} onClick={toggleFullscreen}>
+                {isFullscreen ? <Minimize2 size={16} /> : <Maximize2 size={16} />}
+              </div>
+              <div class="header-btn" title="Icon mode" onClick={toIconMode}>
+                <Minus size={16} />
+              </div>
             </div>
-            
+
             <div id="chat-body" ref={chatAreaRef}>
               {messages.map((msg, idx) => (
-                <div key={idx} class={`msg ${msg.role}`}>
-                  {msg.text}
-                </div>
+                <div key={idx} class={`msg ${msg.role}`}>{msg.text}</div>
               ))}
               {(aiState === 'thinking' || aiState === 'generating') && (
                 <div class="msg ai typing-msg">
@@ -206,12 +261,12 @@ function App() {
                 </div>
               )}
             </div>
-            
+
             <div id="chat-footer">
               <form class="chat-form" onSubmit={handleSubmit}>
-                <input 
-                  id="chat-input" 
-                  type="text" 
+                <input
+                  id="chat-input"
+                  type="text"
                   placeholder="Type a message..."
                   value={input}
                   onInput={handleInput}
@@ -224,6 +279,10 @@ function App() {
       )}
     </div>
   );
+}
+
+function App() {
+  return isSettingsPage ? <SettingsPage /> : <ChatApp />;
 }
 
 export default App;

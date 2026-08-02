@@ -17,6 +17,9 @@ html,body, #root{
   overflow:hidden;
   background: transparent !important;
 }
+body.settings-page, body.settings-page #root {
+  background: var(--cream) !important;
+}
 
 #remie-root{
   display: flex;
@@ -30,12 +33,10 @@ html,body, #root{
 /* ---------- ICON MODE ---------- */
 #icon-mode{
   width:200px; height:200px;
-  border-radius:50%;
-  background:var(--cream);
+  background:transparent;
   display:flex; align-items:center; justify-content:center;
   cursor:grab;
   position:relative;
-  overflow:hidden;
 }
 #icon-mode:active{cursor:grabbing;}
 #icon-mode img{
@@ -45,13 +46,11 @@ html,body, #root{
   opacity:0;
   transition:opacity .35s ease;
   pointer-events: none;
+  filter: drop-shadow(0 0 2px #fff) drop-shadow(0 0 2px #fff) drop-shadow(0 0 3px #fff) drop-shadow(0 4px 12px rgba(150,90,110,.25));
 }
 #icon-mode img.active{opacity:1;}
-#icon-mode .expand-hit{
-  position:absolute; inset:0; border-radius:50%;
-}
 .icon-ring{
-  position:absolute; inset:-8px;
+  position:absolute; inset: 12px;
   border-radius:50%;
   border:2.5px dashed var(--lav-deep);
   opacity:0;
@@ -80,7 +79,7 @@ html,body, #root{
 #chat-mode{
   width: 100%;
   height: 100%;
-  max-width: 560px;
+  max-width: 600px;
   max-height: 720px;
   background:var(--cream);
   border:2.5px solid var(--line);
@@ -98,6 +97,7 @@ html,body, #root{
   flex-direction: row;
 }
 
+/* mascot side panel (full mode only) */
 .mascot-side-panel {
   display: none;
   width: 240px;
@@ -129,24 +129,67 @@ html,body, #root{
   opacity: 1;
 }
 
+/* settings bar (bottom of mascot panel) */
+.settings-bar {
+  position: absolute;
+  bottom: 16px;
+  left: 16px;
+  right: 16px;
+  display: flex;
+  align-items: center;
+  justify-content: flex-end;
+  gap: 10px;
+  cursor: pointer;
+  z-index: 10;
+}
+.settings-bar .user-name {
+  font-weight: 600;
+  font-size: 14px;
+  color: var(--ink);
+  opacity: 0.8;
+  max-width: 140px;
+  white-space: nowrap;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  text-align: right;
+}
+.settings-gear {
+  width: 36px;
+  height: 36px;
+  border-radius: 12px;
+  border: 2px solid var(--line);
+  background: #fff;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  transition: transform .15s ease, background .15s ease;
+}
+.settings-bar:hover .settings-gear {
+  background: var(--pink-pale);
+  transform: translateY(-1px);
+}
+
+/* chat content column */
 .chat-content-panel {
   flex: 1;
   display: flex;
   flex-direction: column;
   min-width: 0;
+  min-height: 0;
 }
 
 /* drag handle header */
 #chat-header{
-  display:flex; align-items:center; gap:12px;
-  padding:14px 16px;
+  display:flex; align-items:center; gap:10px;
+  padding:10px 14px;
   background:linear-gradient(135deg,var(--pink-pale),#f1eefb);
   border-bottom:2px solid var(--line);
   cursor:grab;
+  flex-shrink: 0;
 }
 #chat-header:active{cursor:grabbing;}
 #chat-avatar{
-  width:80px; height:80px; border-radius:50%;
+  width:44px; height:44px; border-radius:50%;
   background:#fff;
   border:2px solid var(--line);
   overflow:hidden;
@@ -165,7 +208,7 @@ html,body, #root{
 }
 #chat-avatar img.active{opacity:1;}
 #chat-title{flex:1; min-width:0; pointer-events: none;}
-#chat-title .name{font-weight:700; font-size:16px; margin-bottom: 2px;}
+#chat-title .name{font-weight:700; font-size:15px; margin-bottom: 2px;}
 #chat-title .status-text{
   font-size:12px; color:#8b7a86; font-weight:600;
   display:flex; align-items:center; gap:5px;
@@ -175,7 +218,7 @@ html,body, #root{
   transition:background .3s ease;
 }
 .header-btn{
-  width:32px; height:32px; border-radius:10px;
+  width:30px; height:30px; border-radius:9px;
   border:2px solid var(--line); background:#fff;
   display:flex; align-items:center; justify-content:center;
   cursor:pointer; font-size:14px; flex:none;
@@ -186,9 +229,10 @@ html,body, #root{
 /* messages */
 #chat-body{
   flex:1; overflow-y:auto;
-  padding:14px 12px;
+  padding:12px;
   display:flex; flex-direction:column; gap:10px;
   scrollbar-width:thin;
+  min-height: 0;
 }
 .msg{
   max-width:80%;
@@ -228,6 +272,7 @@ html,body, #root{
   padding:10px 12px;
   border-top:2px solid var(--line);
   background:#fff;
+  flex-shrink: 0;
 }
 .chat-form {
   display: flex;
@@ -254,3 +299,63 @@ html,body, #root{
 }
 #send-btn:hover{ transform:translateY(-1px) scale(1.03); }
 #send-btn:active{ transform:scale(.95); }
+
+/* ─── Standalone Settings Window ─────────────────────────────────────────── */
+#settings-root {
+  width: 100%;
+  height: 100%;
+  background: var(--cream);
+  display: flex;
+  flex-direction: column;
+  overflow: hidden;
+}
+
+.settings-view.standalone {
+  display: flex;
+  flex-direction: column;
+  height: 100%;
+  background: var(--cream);
+}
+
+.settings-body {
+  flex: 1;
+  padding: 32px;
+  background: var(--cream);
+  display: flex;
+  flex-direction: column;
+  gap: 24px;
+  overflow-y: auto;
+}
+
+.settings-section-title {
+  font-size: 11px;
+  font-weight: 700;
+  text-transform: uppercase;
+  letter-spacing: 0.1em;
+  color: var(--lav-deep);
+  margin-bottom: -8px;
+}
+
+.setting-item {
+  display: flex;
+  flex-direction: column;
+  gap: 8px;
+}
+.setting-item label {
+  font-weight: 600;
+  font-size: 14px;
+  color: var(--ink);
+}
+.setting-item input {
+  padding: 10px 14px;
+  border: 2px solid var(--line);
+  border-radius: 12px;
+  font-family: inherit;
+  font-size: 14px;
+  background: #fff;
+  outline: none;
+  transition: border-color .2s ease;
+}
+.setting-item input:focus {
+  border-color: var(--pink-deep);
+}
