@@ -2,7 +2,8 @@ import { useState, useEffect, useRef } from "preact/hooks";
 import { getCurrentWindow, LogicalSize, LogicalPosition } from "@tauri-apps/api/window";
 import { listen } from "@tauri-apps/api/event";
 import { invoke } from "@tauri-apps/api/core";
-import { Settings, Maximize2, Minimize2, Minus } from "lucide-preact";
+import { load } from "@tauri-apps/plugin-store";
+import { Settings, Maximize2, Minimize2, Minus, AlertTriangle, Settings2, Info } from "lucide-preact";
 
 // Assets
 import remieGen from "./assets/remie_gen.gif";
@@ -19,16 +20,88 @@ const STATE_LABELS = {
   complete: 'done!'
 };
 
+// Models that support thinking / reasoning params
+const THINKING_MODELS = new Set([
+  // Groq reasoning models
+  "openai/gpt-oss-120b", "openai/gpt-oss-20b",
+  // Claude extended thinking
+  "claude-opus-4-5", "claude-sonnet-4-5",
+]);
+
 export default function ChatApp() {
   const [mode, setMode] = useState("chatbox"); // 'chatbox' or 'widget'
   const [aiState, setAiState] = useState("waiting_input");
   const [input, setInput] = useState("");
-  const [messages, setMessages] = useState([
-    { role: "ai", text: "hi Manager, It's Remie~" }
-  ]);
-  const [userName] = useState("Manager");
+  const [messages, setMessages] = useState([]);
+  const [userName, setUserName] = useState("Manager");
+  const [activeProvider, setActiveProvider] = useState("openai");
+  const [activeModel, setActiveModel] = useState("gpt-4o");
   const [isFullscreen, setIsFullscreen] = useState(false);
+  const [temperature, setTemperature] = useState(1.0);
+  const [maxTokens, setMaxTokens] = useState(2048);
+  const [thinkingEnabled, setThinkingEnabled] = useState(false);
+  const [thinkingEffort, setThinkingEffort] = useState("medium");
+  const [thinkingPopoverOpen, setThinkingPopoverOpen] = useState(false);
+  const thinkingBtnRef = useRef(null);
   const chatAreaRef = useRef(null);
+  const streamingIdxRef = useRef(null); // index of the message being streamed
+
+  // Load config from plugin-store on mount
+  useEffect(() => {
+    const isBirthday = (bday) => {
+      if (!bday.month || !bday.day) return false;
+      const today = new Date();
+      return parseInt(bday.month) === today.getMonth() + 1 &&
+             parseInt(bday.day) === today.getDate();
+    };
+
+    const initStore = async () => {
+      const s = await load("config.json", { autoSave: false });
+      const name = await s.get("userName") ?? "Manager";
+      const bday = await s.get("birthday") ?? { day: "", month: "", year: "" };
+      const provider = await s.get("activeProvider") ?? "openai";
+      const model = await s.get("activeModel") ?? "gpt-4o";
+      const temp = await s.get("temperature") ?? 1.0;
+      const tokens = await s.get("maxTokens") ?? 2048;
+      setUserName(name);
+      setActiveProvider(provider);
+      setActiveModel(model);
+      setTemperature(temp);
+      setMaxTokens(tokens);
+
+      const greeting = isBirthday(bday)
+        ? `Happy Birthday, ${name}! It's Remie~ Wishing you a wonderful day today!`
+        : `hi ${name}, It's Remie~`;
+      setMessages([{ role: "ai", text: greeting }]);
+    };
+    initStore();
+  }, []);
+
+  // Live update when Settings saves profile changes
+  useEffect(() => {
+    let unlisten;
+    listen("profile:updated", (event) => {
+      const { userName: newName } = event.payload;
+      if (newName) setUserName(newName);
+    }).then((fn) => { unlisten = fn; });
+    return () => { if (unlisten) unlisten(); };
+  }, []);
+
+  // Live update when Settings changes provider, model, or gen params
+  useEffect(() => {
+    let unlisten;
+    listen("config:updated", (event) => {
+      const { activeProvider: p, activeModel: m, temperature: t, maxTokens: tk } = event.payload;
+      if (p) setActiveProvider(p);
+      if (m) {
+        setActiveModel(m);
+        setThinkingEnabled(false);
+      }
+      if (t !== undefined) setTemperature(t);
+      if (tk !== undefined) setMaxTokens(tk);
+    }).then((fn) => { unlisten = fn; });
+    return () => { if (unlisten) unlisten(); };
+  }, []);
 
   // Auto scroll
   useEffect(() => {
@@ -125,18 +198,89 @@ export default function ChatApp() {
 
   const handleSubmit = async (e) => {
     e.preventDefault();
-    if (!input.trim()) return;
-    setMessages(prev => [...prev, { role: "user", text: input }]);
+    const text = input.trim();
+    if (!text) return;
+
+    // Build message history for context (map ai→assistant for API)
+    const history = messages.map((m) => ({
+      role: m.role === "ai" ? "assistant" : "user",
+      content: m.text,
+    }));
+    history.push({ role: "user", content: text });
+
+    setMessages((prev) => [...prev, { role: "user", text }]);
     setInput("");
     setAiState("thinking");
-    setTimeout(() => {
+
+    // Add empty AI message bubble for streaming into
+    setMessages((prev) => {
+      streamingIdxRef.current = prev.length;
+      return [...prev, { role: "ai", text: "" }];
+    });
+
+    // Set up stream listeners
+    const unlistenToken = await listen("chat:token", (event) => {
       setAiState("generating");
-      setTimeout(() => {
-        setMessages(prev => [...prev, { role: "ai", text: "here's a placeholder reply — wire this up to your model!" }]);
-        setAiState("complete");
-        setTimeout(() => setAiState("waiting_input"), 1500);
-      }, 2000);
-    }, 900);
+      setMessages((prev) => {
+        const idx = streamingIdxRef.current;
+        if (idx === null) return prev;
+        const next = [...prev];
+        next[idx] = { ...next[idx], text: next[idx].text + event.payload };
+        return next;
+      });
+    });
+
+    const unlistenDone = await listen("chat:done", () => {
+      setAiState("complete");
+      streamingIdxRef.current = null;
+      setTimeout(() => setAiState("waiting_input"), 1500);
+      unlistenToken();
+      unlistenDone();
+      unlistenError();
+    });
+
+    // eslint-disable-next-line prefer-const
+    let unlistenError;
+    unlistenError = await listen("chat:error", (event) => {
+      setMessages((prev) => {
+        const idx = streamingIdxRef.current;
+        if (idx === null) return prev;
+        const next = [...prev];
+        next[idx] = { ...next[idx], text: event.payload, isError: true };
+        return next;
+      });
+      setAiState("waiting_input");
+      streamingIdxRef.current = null;
+      unlistenToken();
+      unlistenDone();
+      unlistenError();
+    });
+
+    try {
+      await invoke("send_message", {
+        provider: activeProvider,
+        model: activeModel,
+        messages: history,
+        temperature,
+        maxTokens,
+        thinkingEnabled,
+        reasoningEffort: thinkingEffort,
+      });
+    } catch (err) {
+      // Rust-side error (e.g. no key saved) surfaced here too
+      setMessages((prev) => {
+        const idx = streamingIdxRef.current;
+        if (idx === null) return prev;
+        const next = [...prev];
+        next[idx] = { ...next[idx], text: String(err), isError: true };
+        return next;
+      });
+      setAiState("waiting_input");
+      streamingIdxRef.current = null;
+      unlistenToken();
+      unlistenDone();
+      unlistenError();
+    }
   };
 
   const toggleFullscreen = async () => {
@@ -226,9 +370,15 @@ export default function ChatApp() {
             </div>
 
             <div id="chat-body" ref={chatAreaRef}>
-              {messages.map((msg, idx) => (
-                <div key={idx} class={`msg ${msg.role}`}>{msg.text}</div>
-              ))}
+              {messages.map((msg, idx) => {
+                if (!msg.text && !msg.isError) return null;
+                return (
+                  <div key={idx} class={`msg ${msg.role}${msg.isError ? ' error' : ''}`}>
+                    {msg.isError && <AlertTriangle size={14} style={{ flexShrink: 0, marginTop: '1px' }} />}
+                    <span>{msg.text}</span>
+                  </div>
+                );
+              })}
               {(aiState === 'thinking' || aiState === 'generating') && (
                 <div class="msg ai typing-msg">
                   <span></span><span></span><span></span>
@@ -238,6 +388,50 @@ export default function ChatApp() {
 
             <div id="chat-footer">
               <form class="chat-form" onSubmit={handleSubmit}>
+                {/* Thinking popover trigger */}
+                {(() => {
+                  const supported = THINKING_MODELS.has(activeModel);
+                  return (
+                    <div style={{ position: 'relative', flexShrink: 0 }} ref={thinkingBtnRef}>
+                      <button
+                        type="button"
+                        class={`icon-btn thinking-toggle${thinkingEnabled && supported ? " active" : ""}${!supported ? " disabled" : ""}`}
+                        title="Thinking settings"
+                        onClick={() => supported && setThinkingPopoverOpen(v => !v)}
+                      >
+                        <Settings2 size={16} />
+                      </button>
+                      {thinkingPopoverOpen && supported && (
+                        <div class="thinking-popover">
+                          <div class="thinking-popover-row">
+                            <span>Thinking</span>
+                            <label class="toggle-switch">
+                              <input type="checkbox" checked={thinkingEnabled} onChange={e => setThinkingEnabled(e.target.checked)} />
+                              <span class="toggle-track" />
+                              <span class="toggle-thumb" />
+                            </label>
+                          </div>
+                          {thinkingEnabled && (
+                            <>
+                              <div class="thinking-popover-row" style={{ fontWeight: 500 }}>Effort</div>
+                              <div class="effort-pills">
+                                {["low", "medium", "high"].map(e => (
+                                  <button key={e} type="button" class={`effort-pill${thinkingEffort === e ? " selected" : ""}`} onClick={() => setThinkingEffort(e)}>{e}</button>
+                                ))}
+                              </div>
+                            </>
+                          )}
+                        </div>
+                      )}
+                      {!supported && thinkingPopoverOpen && (
+                        <div class="thinking-popover">
+                          <div class="thinking-popover-row"><Info size={14} style={{ marginRight: 6 }} />Not supported</div>
+                          <div class="thinking-popover-hint">This model doesn't support reasoning mode. Switch to claude-opus-4-5, claude-sonnet-4-5, or openai/gpt-oss-120b.</div>
+                        </div>
+                      )}
+                    </div>
+                  );
+                })()}
                 <input
                   id="chat-input"
                   type="text"
