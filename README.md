@@ -1,24 +1,60 @@
-# Tauri + Preact
+<div align="center">
+  <img src="app-icon.png" width="128" alt="Remie Chat Logo" />
+  <h1>Remie Chat</h1>
+</div>
 
-This template should help get you started developing with Tauri and Preact in Vite.
+<div align="center">
+  <img src="tauri-logo.svg" width="96" alt="Tauri Logo" />
+  <p><strong>Built with Tauri, Preact, and Rust</strong></p>
+</div>
 
-## Recommended IDE Setup
+---
 
-- [VS Code](https://code.visualstudio.com/) + [Tauri](https://marketplace.visualstudio.com/items?itemName=tauri-apps.tauri-vscode) + [rust-analyzer](https://marketplace.visualstudio.com/items?itemName=rust-lang.rust-analyzer)
+## Introduction
 
-Make sure you have installed the prerequisites for your OS: https://tauri.app/start/prerequisites/, then run:
-```  
+Remie is a desktop and mobile **interface** for chatting with AI. It sits on your screen as a compact chatbox, or collapses down to a simple animated icon that reacts to what you're doing.
+
+## Storage & Config
+
+**API keys** are stored securely and locally on your machine, using your operating system's native credential vault. They are never written in plain text and never leave your device except to call the AI provider you've connected directly.
+
+**Other settings** (generation parameters, profile/persona settings) are saved via the Tauri plugin-store, written to a `config.json` file in your OS's AppData directory:
+
+| OS | Location |
+|---|---|
+| Windows | `C:\Users\<User>\AppData\Local\<App Identifier>\config.json` (or `Roaming`) |
+| Android | `N/A` |
+
+---
+
+## Development
+
+### Prerequisites
+
+Install the [prerequisites for your OS](https://tauri.app/start/prerequisites/) before continuing.
+
+### Setup
+
+```bash
 cd remie-chat
 pnpm install
-pnpm tauri android init
-```
-
-For Desktop development, run:
-```
 pnpm tauri dev
 ```
 
-For Android development, run:
-```
+### Android
+
+```bash
 pnpm tauri android dev
 ```
+
+### Recommended IDE Setup
+
+- [VS Code](https://code.visualstudio.com/)
+- [Tauri Extension](https://marketplace.visualstudio.com/items?itemName=tauri-apps.tauri-vscode)
+- [rust-analyzer](https://marketplace.visualstudio.com/items?itemName=rust-lang.rust-analyzer)
+
+---
+
+## Disclaimer
+
+The mascot assets are from a web event by **Zenless Zone Zero**. These assets are not original work and are used here for decorative an entertainment purposes only.
