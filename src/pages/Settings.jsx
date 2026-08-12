@@ -4,6 +4,7 @@ import { emit } from "@tauri-apps/api/event";
 import { invoke } from "@tauri-apps/api/core";
 import { load } from "@tauri-apps/plugin-store";
 import { Check, X, Eye, EyeOff, Trash2 } from "lucide-preact";
+import ConfirmDialog from "../components/ConfirmDialog";
 
 // ─── Toast ────────────────────────────────────────────────────────────────────
 
@@ -20,7 +21,7 @@ function Toast({ message, visible, onHide, isError = false }) {
 
 // ─── SaveableInput ────────────────────────────────────────────────────────────
 
-function SaveableInput({ label, type = "text", value, placeholder, onSave, min, max, hint }) {
+function SaveableInput({ label, type = "text", value, placeholder, onSave, min, max, hint, onDirtyChange }) {
   const [current, setCurrent] = useState(value);
   const [dirty, setDirty] = useState(false);
 
@@ -28,6 +29,10 @@ function SaveableInput({ label, type = "text", value, placeholder, onSave, min, 
     setCurrent(value);
     setDirty(false);
   }, [value]);
+
+  useEffect(() => {
+    if (onDirtyChange) onDirtyChange(dirty);
+  }, [dirty]);
 
   const handleInput = (e) => {
     setCurrent(e.target.value);
@@ -57,7 +62,7 @@ function SaveableInput({ label, type = "text", value, placeholder, onSave, min, 
 
 // ─── SaveableBirthday ─────────────────────────────────────────────────────────
 
-function SaveableBirthday({ label, value, onSave }) {
+function SaveableBirthday({ label, value, onSave, onDirtyChange }) {
   const [current, setCurrent] = useState(value);
   const [dirty, setDirty] = useState(false);
 
@@ -65,6 +70,10 @@ function SaveableBirthday({ label, value, onSave }) {
     setCurrent(value);
     setDirty(false);
   }, [value]);
+
+  useEffect(() => {
+    if (onDirtyChange) onDirtyChange(dirty);
+  }, [dirty]);
 
   const handleChange = (field, e) => {
     const next = { ...current, [field]: e.target.value };
@@ -109,10 +118,15 @@ function SaveableBirthday({ label, value, onSave }) {
 
 // ─── ApiKeyInput ──────────────────────────────────────────────────────────────
 
-function ApiKeyInput({ provider, hasKey, onSave, onDelete }) {
+function ApiKeyInput({ provider, hasKey, onSave, onDelete, onDirtyChange }) {
   const [draft, setDraft] = useState("");
   const [show, setShow] = useState(false);
   const [saving, setSaving] = useState(false);
+
+  const isDirty = draft.trim().length > 0;
+  useEffect(() => {
+    if (onDirtyChange) onDirtyChange(isDirty);
+  }, [isDirty]);
 
   const handleSave = async () => {
     if (!draft.trim()) return;
@@ -190,9 +204,35 @@ export default function SettingsPage() {
   const [toastVisible, setToastVisible] = useState(false);
   const [toastIsError, setToastIsError] = useState(false);
 
-  const showToast = (msg = "Saved!", isError = false) => {
+  const [dirtyFields, setDirtyFields] = useState(new Set());
+  const [showConfirmClose, setShowConfirmClose] = useState(false);
+
+  const handleDirty = (id, isDirty) => {
+    setDirtyFields((prev) => {
+      const next = new Set(prev);
+      if (isDirty) next.add(id);
+      else next.delete(id);
+      return next;
+    });
+  };
+
+  const handleClose = () => {
+    if (dirtyFields.size > 0) {
+      setShowConfirmClose(true);
+    } else {
+      getCurrentWindow().hide();
+    }
+  };
+
+  const forceClose = () => {
+    setShowConfirmClose(false);
+    getCurrentWindow().hide();
+    window.location.reload();
+  };
+
+  const showToast = (msg = "Saved!", err = false) => {
     setToastMsg(msg);
-    setToastIsError(isError);
+    setToastIsError(err);
     setToastVisible(true);
   };
 
@@ -310,7 +350,7 @@ export default function SettingsPage() {
     <div id="settings-root">
       <div class="settings-header" data-tauri-drag-region>
         <div class="settings-title" data-tauri-drag-region>Settings</div>
-        <button class="icon-btn cancel-btn" onClick={() => getCurrentWindow().hide()} title="Close Settings">
+        <button class="icon-btn cancel-btn" onClick={handleClose} title="Close Settings">
           <X size={18} />
         </button>
       </div>
@@ -325,14 +365,17 @@ export default function SettingsPage() {
             value={userName}
             onSave={handleSaveUserName}
             placeholder="Enter your name..."
+            onDirtyChange={(d) => handleDirty("userName", d)}
           />
           <SaveableBirthday
             label="Birthday"
             value={birthday}
             onSave={handleSaveBirthday}
+            onDirtyChange={(d) => handleDirty("birthday", d)}
           />
 
           <div class="settings-section-title">AI Provider</div>
+
           <div class="setting-item">
             <label>Provider</label>
             <div class="input-row">
@@ -359,6 +402,7 @@ export default function SettingsPage() {
             hasKey={providers[activeProvider]}
             onSave={(key) => handleSaveKey(activeProvider, key)}
             onDelete={() => handleDeleteKey(activeProvider)}
+            onDirtyChange={(d) => handleDirty(`key_${activeProvider}`, d)}
           />
 
           <div class="settings-section-title">Generation</div>
@@ -384,9 +428,20 @@ export default function SettingsPage() {
             value={maxTokens}
             onSave={handleSaveMaxTokens}
             hint="Max tokens in the response."
+            onDirtyChange={(d) => handleDirty("maxTokens", d)}
           />
         </div>
       </div>
+
+      <ConfirmDialog
+        visible={showConfirmClose}
+        title="Unsaved Changes"
+        message="You have unsaved changes. Are you sure you want to close without saving?"
+        confirmText="Close Without Saving"
+        cancelText="Cancel"
+        onConfirm={forceClose}
+        onCancel={() => setShowConfirmClose(false)}
+      />
 
       <Toast message={toastMsg} visible={toastVisible} isError={toastIsError} onHide={() => setToastVisible(false)} />
     </div>

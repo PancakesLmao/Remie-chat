@@ -6,11 +6,11 @@ import { load } from "@tauri-apps/plugin-store";
 import { Settings, Maximize2, Minimize2, Minus, AlertTriangle, Settings2, Info } from "lucide-preact";
 
 // Assets
-import remieGen from "./assets/remie_gen.gif";
-import remieComplete from "./assets/remie_complete.gif";
-import remieThinking from "./assets/remie_thinking.gif";
-import remieWaiting from "./assets/remie_waiting_input.gif";
-import userTyping from "./assets/user_typing.gif";
+import remieGen from "../assets/remie_gen.gif";
+import remieComplete from "../assets/remie_complete.gif";
+import remieThinking from "../assets/remie_thinking.gif";
+import remieWaiting from "../assets/remie_waiting_input.gif";
+import userTyping from "../assets/user_typing.gif";
 
 const STATE_LABELS = {
   waiting_input: 'waiting for you',
@@ -34,6 +34,7 @@ export default function ChatApp() {
   const [input, setInput] = useState("");
   const [messages, setMessages] = useState([]);
   const [userName, setUserName] = useState("Manager");
+  const [birthday, setBirthday] = useState({ day: "", month: "", year: "" });
   const [activeProvider, setActiveProvider] = useState("openai");
   const [activeModel, setActiveModel] = useState("gpt-4o");
   const [isFullscreen, setIsFullscreen] = useState(false);
@@ -64,6 +65,7 @@ export default function ChatApp() {
       const temp = await s.get("temperature") ?? 1.0;
       const tokens = await s.get("maxTokens") ?? 2048;
       setUserName(name);
+      setBirthday(bday);
       setActiveProvider(provider);
       setActiveModel(model);
       setTemperature(temp);
@@ -81,8 +83,9 @@ export default function ChatApp() {
   useEffect(() => {
     let unlisten;
     listen("profile:updated", (event) => {
-      const { userName: newName } = event.payload;
+      const { userName: newName, birthday: newBday } = event.payload;
       if (newName) setUserName(newName);
+      if (newBday) setBirthday(newBday);
     }).then((fn) => { unlisten = fn; });
     return () => { if (unlisten) unlisten(); };
   }, []);
@@ -95,7 +98,17 @@ export default function ChatApp() {
       if (p) setActiveProvider(p);
       if (m) {
         setActiveModel(m);
-        setThinkingEnabled(false);
+        setThinkingEnabled(prev => {
+          if (prev && !THINKING_MODELS.has(m)) {
+            // Pop open the toolkit/popover to notify the user
+            setTimeout(() => {
+              setThinkingPopoverOpen(true);
+              setTimeout(() => setThinkingPopoverOpen(false), 3500);
+            }, 100);
+            return false;
+          }
+          return prev;
+        });
       }
       if (t !== undefined) setTemperature(t);
       if (tk !== undefined) setMaxTokens(tk);
@@ -256,6 +269,10 @@ export default function ChatApp() {
       unlistenError();
     });
 
+    const formattedBday = (birthday.day && birthday.month) 
+      ? `${birthday.day}/${birthday.month}${birthday.year ? `/${birthday.year}` : ''}`
+      : "Unknown";
+
     try {
       await invoke("send_message", {
         provider: activeProvider,
@@ -265,6 +282,9 @@ export default function ChatApp() {
         maxTokens,
         thinkingEnabled,
         reasoningEffort: thinkingEffort,
+        userName,
+        userBday: formattedBday,
+        localTime: new Date().toLocaleString(),
       });
     } catch (err) {
       // Rust-side error (e.g. no key saved) surfaced here too
@@ -396,8 +416,14 @@ export default function ChatApp() {
                       <button
                         type="button"
                         class={`icon-btn thinking-toggle${thinkingEnabled && supported ? " active" : ""}${!supported ? " disabled" : ""}`}
-                        title="Thinking settings"
+                        title={supported ? "Thinking settings (supported by this model)" : "Thinking mode not supported by this model"}
                         onClick={() => supported && setThinkingPopoverOpen(v => !v)}
+                        onMouseEnter={() => {
+                          if (!supported) setThinkingPopoverOpen(true);
+                        }}
+                        onMouseLeave={() => {
+                          if (!supported) setThinkingPopoverOpen(false);
+                        }}
                       >
                         <Settings2 size={16} />
                       </button>

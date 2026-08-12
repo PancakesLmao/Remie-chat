@@ -7,9 +7,7 @@ use tauri::{Emitter, Manager};
 use tauri::menu::{Menu, MenuItem};
 use tauri::tray::{MouseButton, MouseButtonState, TrayIconBuilder, TrayIconEvent};
 
-// ─── Key storage via OS Credential Store ─────────────────────────────────────
-// keyring crate uses: Windows Credential Manager / macOS Keychain / libsecret
-// OS handles encryption at rest. No crypto code needed here.
+// OS handles encryption at rest
 
 const KEYRING_SERVICE: &str = "remie-chat";
 
@@ -17,10 +15,7 @@ fn key_entry(provider: &str) -> Result<keyring::Entry, String> {
     keyring::Entry::new(KEYRING_SERVICE, provider).map_err(|e| e.to_string())
 }
 
-// ─── Tauri commands ───────────────────────────────────────────────────────────
-
 /// Save API key for a provider into OS credential store.
-/// Key stays in OS keychain after this — never returned to JS.
 #[tauri::command]
 fn save_api_key(provider: String, key: String) -> Result<(), String> {
     key_entry(&provider)
@@ -48,9 +43,8 @@ fn delete_api_key(provider: String) -> Result<(), String> {
         .map_err(|e| format!("Failed to delete '{}' key: {}", provider, e))
 }
 
-/// Send a chat message. Reads key from OS keychain, calls provider, streams
+/// Send a chat message.
 /// tokens back via chat:token / chat:done / chat:error events.
-/// Key is consumed entirely within Rust — never emitted to frontend.
 #[tauri::command]
 async fn send_message(
     app: tauri::AppHandle,
@@ -61,6 +55,9 @@ async fn send_message(
     max_tokens: u32,
     thinking_enabled: bool,
     reasoning_effort: String,
+    user_name: String,
+    user_bday: String,
+    local_time: String,
 ) -> Result<(), String> {
     // Read key from OS keychain — scope dropped before async HTTP call
     let key = key_entry(&provider)
@@ -74,10 +71,10 @@ async fn send_message(
         })?;
 
     let result = match provider.as_str() {
-        "openai" => llm::stream_openai(app.clone(), key, model, messages, temperature, max_tokens, thinking_enabled, &reasoning_effort).await,
-        "claude" => llm::stream_claude(app.clone(), key, model, messages, temperature, max_tokens, thinking_enabled, &reasoning_effort).await,
-        "gemini" => llm::stream_gemini(app.clone(), key, model, messages, temperature, max_tokens, thinking_enabled).await,
-        "groq"   => llm::stream_groq(app.clone(), key, model, messages, temperature, max_tokens, thinking_enabled, &reasoning_effort).await,
+        "openai" => llm::stream_openai(app.clone(), key, model, messages, temperature, max_tokens, thinking_enabled, &reasoning_effort, &user_name, &user_bday, &local_time).await,
+        "claude" => llm::stream_claude(app.clone(), key, model, messages, temperature, max_tokens, thinking_enabled, &reasoning_effort, &user_name, &user_bday, &local_time).await,
+        "gemini" => llm::stream_gemini(app.clone(), key, model, messages, temperature, max_tokens, thinking_enabled, &user_name, &user_bday, &local_time).await,
+        "groq"   => llm::stream_groq(app.clone(), key, model, messages, temperature, max_tokens, thinking_enabled, &reasoning_effort, &user_name, &user_bday, &local_time).await,
         other => Err(format!("Unknown provider: {}", other)),
     };
 
@@ -116,7 +113,7 @@ fn show_main(app_handle: &tauri::AppHandle) {
     }
 }
 
-// ─── App entry ────────────────────────────────────────────────────────────────
+// App entry
 
 #[cfg_attr(mobile, tauri::mobile_entry_point)]
 pub fn run() {
