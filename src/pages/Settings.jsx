@@ -181,7 +181,20 @@ const PROVIDER_MODELS = {
   openai: ["gpt-4o", "gpt-4o-mini", "gpt-4-turbo", "gpt-3.5-turbo"],
   claude: ["claude-opus-4-5", "claude-sonnet-4-5", "claude-haiku-4-5"],
   gemini: ["gemini-2.0-flash", "gemini-2.0-flash-lite", "gemini-1.5-pro"],
-  groq:   ["llama-3.3-70b-versatile", "llama-3.1-8b-instant", "openai/gpt-oss-120b", "openai/gpt-oss-20b", "qwen/qwen3-32b", "groq/compound", "groq/compound-mini"],
+  groq:   [
+    "llama-3.3-70b-versatile",
+    "llama-3.1-8b-instant",
+    "openai/gpt-oss-120b",
+    "openai/gpt-oss-20b",
+    "openai/gpt-oss-safeguard-20b",
+    "qwen/qwen3.6-27b",
+    "groq/compound",
+    "groq/compound-mini",
+    "meta-llama/llama-prompt-guard-2-22m",
+    "meta-llama/llama-prompt-guard-2-86m",
+    "whisper-large-v3",
+    "whisper-large-v3-turbo"
+  ],
 };
 
 // ─── SettingsPage ─────────────────────────────────────────────────────────────

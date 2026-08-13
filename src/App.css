@@ -1,3 +1,5 @@
+@import url('https://fonts.googleapis.com/css2?family=Outfit:wght@400;600;800&family=Space+Mono&display=swap');
+
 :root{
   --pink-deep:#E88FA6;
   --pink-mid:#F6B9C6;
@@ -12,7 +14,7 @@
 *{box-sizing:border-box;}
 html,body, #root{
   width:100vw; height:100vh; margin:0; padding:0;
-  font-family:'Segoe UI', 'Helvetica Neue', Arial, sans-serif;
+  font-family:'Outfit', 'Segoe UI', sans-serif;
   color:var(--ink);
   overflow:hidden;
   background: transparent !important;
@@ -78,7 +80,7 @@ body.settings-page, body.settings-page #root {
 #chat-mode{
   width: 100%;
   height: 100%;
-  max-width: 600px;
+  max-width: 800px;
   max-height: 720px;
   background:var(--cream);
   border:2.5px solid var(--line);
@@ -228,10 +230,15 @@ body.settings-page, body.settings-page #root {
   flex:1; overflow-y:auto;
   padding:12px;
   display:flex; flex-direction:column; gap:10px;
-  scrollbar-width:thin;
   min-height: 0;
+  -ms-overflow-style: none;
+  scrollbar-width: none;
+}
+#chat-body::-webkit-scrollbar {
+  display: none;
 }
 .msg{
+  flex-shrink: 0;
   max-width:80%;
   padding:9px 12px;
   border-radius:14px;
@@ -241,6 +248,93 @@ body.settings-page, body.settings-page #root {
   word-wrap: break-word;
   user-select: text;
   cursor: text;
+}
+.markdown-body {
+  width: 100%;
+}
+.markdown-body p {
+  margin: 0 0 8px 0;
+}
+.markdown-body p:last-child {
+  margin-bottom: 0;
+}
+.markdown-body pre {
+  background: rgba(58, 46, 60, 0.06);
+  border: 2px solid var(--line);
+  border-radius: 8px;
+  padding: 8px 10px;
+  margin: 0; /* Let container handle margins */
+  overflow-x: auto;
+  white-space: pre-wrap;
+  word-break: break-all;
+}
+.code-block-container {
+  position: relative;
+  margin: 8px 0;
+}
+.copy-btn {
+  position: absolute;
+  top: 6px;
+  right: 6px;
+  background: var(--cream);
+  border: 2px solid var(--line);
+  border-radius: 6px;
+  padding: 2px 7px;
+  font-size: 11px;
+  font-weight: 700;
+  color: var(--ink);
+  cursor: pointer;
+  opacity: 0.6;
+  transition: opacity 0.15s, background 0.15s, transform 0.1s;
+}
+.copy-btn:hover {
+  opacity: 1;
+  background: var(--pink-pale);
+}
+.copy-btn:active {
+  transform: scale(0.95);
+}
+.copy-btn.copied {
+  background: #8fd6a8;
+  color: #1a5235;
+  border-color: #2a7a4a;
+  opacity: 1;
+}
+.markdown-body code {
+  font-family: 'Space Mono', monospace;
+  font-size: 12px;
+  background: rgba(58, 46, 60, 0.06);
+  padding: 2px 4px;
+  border-radius: 4px;
+  word-break: break-all;
+}
+.markdown-body pre code {
+  background: transparent;
+  padding: 0;
+  border-radius: 0;
+  word-break: normal;
+}
+.markdown-body ul, .markdown-body ol {
+  margin: 8px 0;
+  padding-left: 20px;
+}
+.markdown-body li {
+  margin-bottom: 4px;
+}
+.markdown-body table {
+  width: 100%;
+  border-collapse: collapse;
+  margin: 10px 0;
+  font-size: 12.5px;
+}
+.markdown-body th, .markdown-body td {
+  border: 1.5px solid var(--line);
+  padding: 6px 8px;
+  text-align: left;
+}
+.markdown-body th {
+  background: rgba(58, 46, 60, 0.05);
+  font-weight: 700;
 }
 @keyframes pop{ from{opacity:0; transform:translateY(4px) scale(.97);} to{opacity:1; transform:none;} }
 .msg.user{
@@ -287,6 +381,7 @@ body.settings-page, body.settings-page #root {
   display: flex;
   width: 100%;
   gap: 8px;
+  align-items: flex-end;
 }
 #chat-input{
   flex:1;
@@ -296,6 +391,18 @@ body.settings-page, body.settings-page #root {
   font-size:13.5px;
   outline:none;
   background:var(--cream);
+  resize: none;
+  height: 38px;
+  min-height: 38px;
+  max-height: 76px;
+  line-height: 1.4;
+  overflow-y: auto;
+  font-family: inherit;
+  -ms-overflow-style: none;
+  scrollbar-width: none;
+}
+#chat-input::-webkit-scrollbar {
+  display: none;
 }
 #chat-input:focus{ border-color:var(--pink-deep); }
 #send-btn{

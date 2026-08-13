@@ -4,6 +4,30 @@ import { listen } from "@tauri-apps/api/event";
 import { invoke } from "@tauri-apps/api/core";
 import { load } from "@tauri-apps/plugin-store";
 import { Settings, Maximize2, Minimize2, Minus, AlertTriangle, Settings2, Info } from "lucide-preact";
+import { marked } from "marked";
+import DOMPurify from "dompurify";
+
+function escapeHtml(text) {
+  return text
+    .replace(/&/g, "&amp;")
+    .replace(/</g, "&lt;")
+    .replace(/>/g, "&gt;")
+    .replace(/"/g, "&quot;")
+    .replace(/'/g, "&#039;");
+}
+
+marked.use({
+  renderer: {
+    code(token) {
+      const code = token.text;
+      const lang = token.lang || '';
+      return `<div class="code-block-container">
+        <pre><code class="language-${lang}">${token.escaped ? token.text : escapeHtml(token.text)}</code></pre>
+        <button class="copy-btn" data-code="${encodeURIComponent(code)}" type="button">Copy</button>
+      </div>`;
+    }
+  }
+});
 
 // Assets
 import remieGen from "../assets/remie_gen.gif";
@@ -23,7 +47,7 @@ const STATE_LABELS = {
 // Models that support thinking / reasoning params
 const THINKING_MODELS = new Set([
   // Groq reasoning models
-  "openai/gpt-oss-120b", "openai/gpt-oss-20b",
+  "openai/gpt-oss-120b", "openai/gpt-oss-20b", "openai/gpt-oss-safeguard-20b",
   // Claude extended thinking
   "claude-opus-4-5", "claude-sonnet-4-5",
 ]);
@@ -73,7 +97,7 @@ export default function ChatApp() {
 
       const greeting = isBirthday(bday)
         ? `Happy Birthday, ${name}! It's Remie~ Wishing you a wonderful day today!`
-        : `hi ${name}, It's Remie~`;
+        : `hi, It's Remie~`;
       setMessages([{ role: "ai", text: greeting }]);
     };
     initStore();
@@ -121,7 +145,37 @@ export default function ChatApp() {
     if (chatAreaRef.current) {
       chatAreaRef.current.scrollTop = chatAreaRef.current.scrollHeight;
     }
-  }, [messages, aiState]);
+  }, [messages]);
+
+  // Event delegation for copy buttons
+  useEffect(() => {
+    const handleCopy = async (e) => {
+      const btn = e.target.closest(".copy-btn");
+      if (!btn) return;
+      const code = decodeURIComponent(btn.getAttribute("data-code") || "");
+      try {
+        await navigator.clipboard.writeText(code);
+        btn.innerText = "Copied!";
+        btn.classList.add("copied");
+        setTimeout(() => {
+          btn.innerText = "copy";
+          btn.classList.remove("copied");
+        }, 2000);
+      } catch (err) {
+        console.error("Failed to copy text: ", err);
+      }
+    };
+
+    const chatBody = chatAreaRef.current;
+    if (chatBody) {
+      chatBody.addEventListener("click", handleCopy);
+    }
+    return () => {
+      if (chatBody) {
+        chatBody.removeEventListener("click", handleCopy);
+      }
+    };
+  }, []);
 
   const resizeAnchored = async (win, width, height) => {
     try {
@@ -202,6 +256,13 @@ export default function ChatApp() {
 
   const handleInput = (e) => {
     setInput(e.target.value);
+    
+    // Auto-adjust height up to ~3 lines (accounting for border height)
+    const textarea = e.target;
+    textarea.style.height = "auto";
+    const newHeight = Math.min(textarea.scrollHeight + 4, 76);
+    textarea.style.height = `${newHeight}px`;
+
     if (e.target.value.length > 0) {
       if (aiState === "waiting_input") setAiState("typing");
     } else {
@@ -209,10 +270,23 @@ export default function ChatApp() {
     }
   };
 
+  const handleKeyDown = (e) => {
+    if (e.key === "Enter" && !e.shiftKey) {
+      e.preventDefault();
+      handleSubmit(e);
+    }
+  };
+
   const handleSubmit = async (e) => {
     e.preventDefault();
     const text = input.trim();
     if (!text) return;
+
+    // Reset textarea height
+    const textarea = document.getElementById("chat-input");
+    if (textarea) {
+      textarea.style.height = "38px";
+    }
 
     // Build message history for context (map ai→assistant for API)
     const history = messages.map((m) => ({
@@ -307,7 +381,7 @@ export default function ChatApp() {
     const win = getCurrentWindow();
     const full = !isFullscreen;
     if (full) {
-      await resizeAnchored(win, 600, 720);
+      await resizeAnchored(win, 800, 720);
     } else {
       await resizeAnchored(win, 360, 420);
     }
@@ -373,7 +447,7 @@ export default function ChatApp() {
                 {renderMascots(false)}
               </div>
               <div id="chat-title">
-                <div class="name">{userName}</div>
+                <div class="name">Remie</div>
                 <div class="status-text">
                   <span class="dot" style={{ background: `var(--${getStatusDotClass() === 'waiting' ? 'lav' : getStatusDotClass() === 'typing' ? 'pink-mid' : getStatusDotClass() === 'thinking' ? 'pink-deep' : getStatusDotClass() === 'generating' ? 'lav-deep' : 'complete'})` }}></span>
                   <span id="status-label">{STATE_LABELS[aiState]}</span>
@@ -392,10 +466,11 @@ export default function ChatApp() {
             <div id="chat-body" ref={chatAreaRef}>
               {messages.map((msg, idx) => {
                 if (!msg.text && !msg.isError) return null;
+                const html = DOMPurify.sanitize(marked.parse(msg.text || ""));
                 return (
                   <div key={idx} class={`msg ${msg.role}${msg.isError ? ' error' : ''}`}>
                     {msg.isError && <AlertTriangle size={14} style={{ flexShrink: 0, marginTop: '1px' }} />}
-                    <span>{msg.text}</span>
+                    <div class="markdown-body" dangerouslySetInnerHTML={{ __html: html }} />
                   </div>
                 );
               })}
@@ -458,12 +533,14 @@ export default function ChatApp() {
                     </div>
                   );
                 })()}
-                <input
+                <textarea
                   id="chat-input"
-                  type="text"
                   placeholder="Type a message..."
                   value={input}
                   onInput={handleInput}
+                  onKeyDown={handleKeyDown}
+                  rows={1}
+                  maxLength={2000}
                 />
                 <button id="send-btn" type="submit">➤</button>
               </form>
