@@ -1,10 +1,14 @@
 mod llm;
 
 use llm::Message;
+#[cfg(any(target_os = "windows", target_os = "macos", target_os = "linux"))]
 use rdev::{listen, EventType};
+#[cfg(any(target_os = "windows", target_os = "macos", target_os = "linux"))]
 use std::thread;
 use tauri::{Emitter, Manager};
+#[cfg(desktop)]
 use tauri::menu::{Menu, MenuItem};
+#[cfg(desktop)]
 use tauri::tray::{MouseButton, MouseButtonState, TrayIconBuilder, TrayIconEvent};
 
 // OS handles encryption at rest
@@ -92,13 +96,28 @@ async fn send_message(
 
 
 #[tauri::command]
-fn open_settings_window(app: tauri::AppHandle) {
-    if let Some(window) = app.get_webview_window("settings") {
-        let _ = window.show();
-        let _ = window.set_focus();
+fn open_settings_window(_app: tauri::AppHandle) {
+    #[cfg(not(any(target_os = "android", target_os = "ios")))]
+    {
+        if let Some(window) = _app.get_webview_window("settings") {
+            let _ = window.show();
+            let _ = window.set_focus();
+        } else {
+            let _ = tauri::WebviewWindowBuilder::new(
+                &_app,
+                "settings",
+                tauri::WebviewUrl::App("/?page=settings".into())
+            )
+            .title("Remie – Settings")
+            .inner_size(600.0, 720.0)
+            .resizable(true)
+            .visible(true)
+            .build();
+        }
     }
 }
 
+#[cfg(desktop)]
 fn show_settings(app_handle: &tauri::AppHandle) {
     if let Some(window) = app_handle.get_webview_window("settings") {
         let _ = window.show();
@@ -106,6 +125,7 @@ fn show_settings(app_handle: &tauri::AppHandle) {
     }
 }
 
+#[cfg(desktop)]
 fn show_main(app_handle: &tauri::AppHandle) {
     if let Some(window) = app_handle.get_webview_window("main") {
         let _ = window.show();
@@ -122,38 +142,48 @@ pub fn run() {
         .plugin(tauri_plugin_store::Builder::default().build())
         .setup(|app| {
             // ── Tray ──
-            let quit_i = MenuItem::with_id(app, "quit", "Quit app", true, None::<&str>)?;
-            let open_i = MenuItem::with_id(app, "open", "Open chat", true, None::<&str>)?;
-            let settings_i = MenuItem::with_id(app, "settings", "Settings", true, None::<&str>)?;
-            let menu = Menu::with_items(app, &[&open_i, &settings_i, &quit_i])?;
+            #[cfg(desktop)]
+            {
+                let quit_i = MenuItem::with_id(app, "quit", "Quit app", true, None::<&str>)?;
+                let open_i = MenuItem::with_id(app, "open", "Open chat", true, None::<&str>)?;
+                let settings_i = MenuItem::with_id(app, "settings", "Settings", true, None::<&str>)?;
+                let menu = Menu::with_items(app, &[&open_i, &settings_i, &quit_i])?;
 
-            let _tray = TrayIconBuilder::new()
-                .icon(app.default_window_icon().unwrap().clone())
-                .tooltip("Remie")
-                .menu(&menu)
-                .show_menu_on_left_click(false)
-                .on_menu_event(|app_handle, event| match event.id.as_ref() {
-                    "quit" => app_handle.exit(0),
-                    "open" => show_main(app_handle),
-                    "settings" => show_settings(app_handle),
-                    _ => {}
-                })
-                .on_tray_icon_event(|tray, event| {
-                    if let TrayIconEvent::Click {
-                        button: MouseButton::Left,
-                        button_state: MouseButtonState::Up,
-                        ..
-                    } = event
-                    {
-                        if let Some(window) = tray.app_handle().get_webview_window("main") {
-                            let _ = window.show();
-                            let _ = window.set_focus();
+                let _tray = TrayIconBuilder::new()
+                    .icon(app.default_window_icon().unwrap().clone())
+                    .tooltip("Remie")
+                    .menu(&menu)
+                    .show_menu_on_left_click(false)
+                    .on_menu_event(|app_handle, event| match event.id.as_ref() {
+                        "quit" => app_handle.exit(0),
+                        "open" => show_main(app_handle),
+                        "settings" => show_settings(app_handle),
+                        _ => {}
+                    })
+                    .on_tray_icon_event(|tray, event| {
+                        if let TrayIconEvent::Click {
+                            button: MouseButton::Left,
+                            button_state: MouseButtonState::Up,
+                            ..
+                        } = event
+                        {
+                            if let Some(window) = tray.app_handle().get_webview_window("main") {
+                                let _ = window.show();
+                                let _ = window.set_focus();
+                            }
                         }
-                    }
-                })
-                .build(app)?;
+                    })
+                    .build(app)?;
+            }
 
-            // Intercept settings window close — hide instead of destroy
+            // On mobile, close settings window if Tauri instantiated it from tauri.conf.json
+            #[cfg(mobile)]
+            if let Some(settings_win) = app.get_webview_window("settings") {
+                let _ = settings_win.close();
+            }
+
+            // On desktop, intercept settings window close — hide instead of destroy
+            #[cfg(desktop)]
             if let Some(settings_win) = app.get_webview_window("settings") {
                 let win_clone = settings_win.clone();
                 settings_win.on_window_event(move |event| {
@@ -165,16 +195,19 @@ pub fn run() {
             }
 
             // ── Global keyboard hook (existing feature) ──
-            let app_handle = app.handle().clone();
-            thread::spawn(move || {
-                if let Err(error) = listen(move |event| {
-                    if let EventType::KeyPress(_) = event.event_type {
-                        let _ = app_handle.emit("global-keypress", ());
+            #[cfg(any(target_os = "windows", target_os = "macos", target_os = "linux"))]
+            {
+                let app_handle = app.handle().clone();
+                thread::spawn(move || {
+                    if let Err(error) = listen(move |event| {
+                        if let EventType::KeyPress(_) = event.event_type {
+                            let _ = app_handle.emit("global-keypress", ());
+                        }
+                    }) {
+                        println!("rdev error: {:?}", error);
                     }
-                }) {
-                    println!("rdev error: {:?}", error);
-                }
-            });
+                });
+            }
 
             Ok(())
         })

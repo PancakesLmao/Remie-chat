@@ -3,7 +3,8 @@ import { getCurrentWindow, LogicalSize, LogicalPosition } from "@tauri-apps/api/
 import { listen } from "@tauri-apps/api/event";
 import { invoke } from "@tauri-apps/api/core";
 import { load } from "@tauri-apps/plugin-store";
-import { Settings, Maximize2, Minimize2, Minus, AlertTriangle, Settings2, Info } from "lucide-preact";
+import { Maximize2, Minimize2, Minus, AlertTriangle, Settings2, Info, PanelLeft } from "lucide-preact";
+import Sidebar from "../components/Sidebar.jsx";
 import { marked } from "marked";
 import DOMPurify from "dompurify";
 
@@ -53,6 +54,7 @@ const THINKING_MODELS = new Set([
 ]);
 
 export default function ChatApp() {
+  const [isMobile] = useState(() => (window.__TAURI_INTERNALS__ && ["android", "ios"].includes(window.__TAURI_INTERNALS__.platform)) || navigator.userAgent.includes("Android") || navigator.userAgent.includes("iPhone") || navigator.userAgent.includes("iPad"));
   const [mode, setMode] = useState("chatbox"); // 'chatbox' or 'widget'
   const [aiState, setAiState] = useState("waiting_input");
   const [input, setInput] = useState("");
@@ -68,6 +70,7 @@ export default function ChatApp() {
   const [thinkingEffort, setThinkingEffort] = useState("medium");
   const [thinkingPopoverOpen, setThinkingPopoverOpen] = useState(false);
   const thinkingBtnRef = useRef(null);
+  const thinkingTimeoutRef = useRef(null);
   const chatAreaRef = useRef(null);
   const streamingIdxRef = useRef(null); // index of the message being streamed
 
@@ -97,7 +100,7 @@ export default function ChatApp() {
 
       const greeting = isBirthday(bday)
         ? `Happy Birthday, ${name}! It's Remie~ Wishing you a wonderful day today!`
-        : `hi, It's Remie~`;
+        : `Hi Manager, It's Remie~`;
       setMessages([{ role: "ai", text: greeting }]);
     };
     initStore();
@@ -170,14 +173,27 @@ export default function ChatApp() {
     if (chatBody) {
       chatBody.addEventListener("click", handleCopy);
     }
+
+    // Click outside listener for thinking popover
+    const handleClickOutside = (e) => {
+      if (thinkingBtnRef.current && !thinkingBtnRef.current.contains(e.target)) {
+        setThinkingPopoverOpen(false);
+      }
+    };
+    document.addEventListener("mousedown", handleClickOutside);
+    document.addEventListener("touchstart", handleClickOutside);
+
     return () => {
       if (chatBody) {
         chatBody.removeEventListener("click", handleCopy);
       }
+      document.removeEventListener("mousedown", handleClickOutside);
+      document.removeEventListener("touchstart", handleClickOutside);
     };
   }, []);
 
   const resizeAnchored = async (win, width, height) => {
+    if (navigator.userAgent.includes("Android") || navigator.userAgent.includes("iPhone") || navigator.userAgent.includes("iPad")) return;
     try {
       const scaleFactor = await win.scaleFactor();
       const currentSize = await win.outerSize();
@@ -199,6 +215,7 @@ export default function ChatApp() {
   // Window resizing based on mode
   useEffect(() => {
     const resizeWindow = async () => {
+      if (isMobile) return;
       try {
         const win = getCurrentWindow();
         await win.setAlwaysOnTop(true);
@@ -398,7 +415,18 @@ export default function ChatApp() {
     return aiState;
   };
 
-  const openSettings = () => invoke('open_settings_window');
+  const openSettings = async () => {
+    const isMobileDevice = /Android|webOS|iPhone|iPad|iPod/i.test(navigator.userAgent) || (window.__TAURI_INTERNALS__ && ["android", "ios"].includes(window.__TAURI_INTERNALS__.platform));
+    if (isMobileDevice) {
+      window.location.hash = "settings";
+    } else {
+      try {
+        await invoke('open_settings_window');
+      } catch (e) {
+        window.location.hash = "settings";
+      }
+    }
+  };
 
   return (
     <div id="remie-root">
@@ -417,20 +445,20 @@ export default function ChatApp() {
       ) : (
         <div id="chat-mode" class={isFullscreen ? 'full' : ''}>
 
-          {/* Mascot side panel — full mode only */}
-          <div class="mascot-side-panel" data-tauri-drag-region onPointerDown={(e) => {
-            if (e.button === 0 && !e.target.closest('.settings-bar')) getCurrentWindow().startDragging();
-          }}>
-            {renderMascots(true)}
-            {isFullscreen && (
-              <div class="settings-bar" onClick={openSettings}>
-                <span class="user-name">{userName}</span>
-                <div class="settings-gear" title="Settings">
-                  <Settings size={20} />
-                </div>
-              </div>
-            )}
-          </div>
+          {/* Mobile backdrop for closing sidebar */}
+          {isFullscreen && isMobile && (
+            <div class="sidebar-backdrop" onClick={() => setIsFullscreen(false)}></div>
+          )}
+
+          {/* Mascot side panel */}
+          <Sidebar 
+            isFullscreen={isFullscreen}
+            isMobile={isMobile}
+            userName={userName}
+            renderMascots={renderMascots}
+            openSettings={openSettings}
+            closeSidebar={() => setIsFullscreen(false)}
+          />
 
           {/* Main chat panel */}
           <div class="chat-content-panel">
@@ -443,6 +471,13 @@ export default function ChatApp() {
                 }
               }}
             >
+              {/* Mobile Sidebar Button (Back button style) */}
+              {isMobile && (
+                <div class="header-btn" title="Show side panel" onClick={toggleFullscreen}>
+                  <PanelLeft size={18} />
+                </div>
+              )}
+
               <div id="chat-avatar">
                 {renderMascots(false)}
               </div>
@@ -454,13 +489,19 @@ export default function ChatApp() {
                 </div>
               </div>
 
-              {/* 2 buttons: mode toggle + icon mode */}
-              <div class="header-btn" title={isFullscreen ? "Mini chat" : "Full chat"} onClick={toggleFullscreen}>
-                {isFullscreen ? <Minimize2 size={16} /> : <Maximize2 size={16} />}
-              </div>
-              <div class="header-btn" title="Icon mode" onClick={toIconMode}>
-                <Minus size={16} />
-              </div>
+              {/* Desktop Expand Button */}
+              {!isMobile && (
+                <div class="header-btn" title={isFullscreen ? "Collapse" : "Expand"} onClick={toggleFullscreen}>
+                  {isFullscreen ? <Minimize2 size={16} /> : <Maximize2 size={16} />}
+                </div>
+              )}
+
+              {/* Icon mode button - Desktop only */}
+              {!isMobile && (
+                <div class="header-btn" title="Icon mode" onClick={toIconMode}>
+                  <Minus size={16} />
+                </div>
+              )}
             </div>
 
             <div id="chat-body" ref={chatAreaRef}>
@@ -492,12 +533,25 @@ export default function ChatApp() {
                         type="button"
                         class={`icon-btn thinking-toggle${thinkingEnabled && supported ? " active" : ""}${!supported ? " disabled" : ""}`}
                         title={supported ? "Thinking settings (supported by this model)" : "Thinking mode not supported by this model"}
-                        onClick={() => supported && setThinkingPopoverOpen(v => !v)}
+                        onClick={() => {
+                          if (supported || isMobile) {
+                            setThinkingPopoverOpen(v => {
+                              const next = !v;
+                              if (next && isMobile && !supported) {
+                                if (thinkingTimeoutRef.current) clearTimeout(thinkingTimeoutRef.current);
+                                thinkingTimeoutRef.current = setTimeout(() => {
+                                  setThinkingPopoverOpen(false);
+                                }, 3500);
+                              }
+                              return next;
+                            });
+                          }
+                        }}
                         onMouseEnter={() => {
-                          if (!supported) setThinkingPopoverOpen(true);
+                          if (!supported && !isMobile) setThinkingPopoverOpen(true);
                         }}
                         onMouseLeave={() => {
-                          if (!supported) setThinkingPopoverOpen(false);
+                          if (!supported && !isMobile) setThinkingPopoverOpen(false);
                         }}
                       >
                         <Settings2 size={16} />

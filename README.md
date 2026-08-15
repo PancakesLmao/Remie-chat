@@ -42,9 +42,19 @@ pnpm tauri dev
 ```
 
 ### Android
-
+If you have Emulator, then start it:
+```powershell
+Start-Process -FilePath "C:\Users\<Username>\AppData\Local\Android\Sdk\emulator\emulator.exe" -ArgumentList "-avd remie_emulator"
+```
+Start app in development mode:
 ```bash
-pnpm tauri android dev
+pnpm tauri android dev --host 127.0.0.1
+```
+If no emulator detected, the app will spin up Android Studio instead
+
+Clean up emulator:
+```bash
+C:\Users\<Username>\AppData\Local\Android\Sdk\platform-tools\adb.exe shell pm clear com.pancakes.remie_chat
 ```
 
 ### Recommended IDE Setup

@@ -199,7 +199,7 @@ const PROVIDER_MODELS = {
 
 // ─── SettingsPage ─────────────────────────────────────────────────────────────
 
-export default function SettingsPage() {
+export default function SettingsPage({ onClose }) {
   const [store, setStore] = useState(null);
 
   // Config state (stored in plugin-store)
@@ -229,18 +229,28 @@ export default function SettingsPage() {
     });
   };
 
+  const isMobile = /Android|webOS|iPhone|iPad|iPod/i.test(navigator.userAgent) || (window.__TAURI_INTERNALS__ && ["android", "ios"].includes(window.__TAURI_INTERNALS__.platform));
+  const isSettingsWindow = !isMobile && new URLSearchParams(window.location.search).get('page') === 'settings';
+
   const handleClose = () => {
     if (dirtyFields.size > 0) {
       setShowConfirmClose(true);
     } else {
-      getCurrentWindow().hide();
+      if (!isSettingsWindow) {
+        if (onClose) onClose();
+      } else {
+        getCurrentWindow().hide();
+      }
     }
   };
 
   const forceClose = () => {
     setShowConfirmClose(false);
-    getCurrentWindow().hide();
-    window.location.reload();
+    if (!isSettingsWindow) {
+      if (onClose) onClose();
+    } else {
+      getCurrentWindow().hide();
+    }
   };
 
   const showToast = (msg = "Saved!", err = false) => {

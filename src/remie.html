@@ -333,7 +333,6 @@
   }
 
   // ---- state auto-detection hooks ----
-  // Real app: wire these to actual keyboard listeners / AI SDK events.
   let typingTimeout;
   input.addEventListener('input', ()=>{
     setState('typing');
@@ -428,7 +427,6 @@
   makeDraggable(document.getElementById('chat-header'));
   makeDraggable(iconMode);
 
-  // init
   setState('waiting_input');
   showChat();
 })();
