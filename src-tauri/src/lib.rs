@@ -1,4 +1,3 @@
-
 #[cfg(any(target_os = "windows", target_os = "macos", target_os = "linux"))]
 use rdev::{listen, EventType};
 #[cfg(any(target_os = "windows", target_os = "macos", target_os = "linux"))]
@@ -52,16 +51,71 @@ async fn send_message(
 ) -> Result<(), String> {
     match provider.as_str() {
         "openai" => {
-            llm::stream_openai(app, event_id, api_key, model, messages, temperature, max_tokens, thinking_enabled, &reasoning_effort, &user_name, &user_bday, &local_time).await
+            llm::stream_openai(
+                app,
+                event_id,
+                api_key,
+                model,
+                messages,
+                temperature,
+                max_tokens,
+                thinking_enabled,
+                &reasoning_effort,
+                &user_name,
+                &user_bday,
+                &local_time,
+            )
+            .await
         }
         "groq" => {
-            llm::stream_groq(app, event_id, api_key, model, messages, temperature, max_tokens, thinking_enabled, &reasoning_effort, &user_name, &user_bday, &local_time).await
+            llm::stream_groq(
+                app,
+                event_id,
+                api_key,
+                model,
+                messages,
+                temperature,
+                max_tokens,
+                thinking_enabled,
+                &reasoning_effort,
+                &user_name,
+                &user_bday,
+                &local_time,
+            )
+            .await
         }
         "claude" => {
-            llm::stream_claude(app, event_id, api_key, model, messages, temperature, max_tokens, thinking_enabled, &reasoning_effort, &user_name, &user_bday, &local_time).await
+            llm::stream_claude(
+                app,
+                event_id,
+                api_key,
+                model,
+                messages,
+                temperature,
+                max_tokens,
+                thinking_enabled,
+                &reasoning_effort,
+                &user_name,
+                &user_bday,
+                &local_time,
+            )
+            .await
         }
         "gemini" => {
-            llm::stream_gemini(app, event_id, api_key, model, messages, temperature, max_tokens, thinking_enabled, &user_name, &user_bday, &local_time).await
+            llm::stream_gemini(
+                app,
+                event_id,
+                api_key,
+                model,
+                messages,
+                temperature,
+                max_tokens,
+                thinking_enabled,
+                &user_name,
+                &user_bday,
+                &local_time,
+            )
+            .await
         }
         _ => Err(format!("Unknown provider {}", provider)),
     }
@@ -88,9 +142,11 @@ fn show_main(app_handle: &tauri::AppHandle) {
 #[cfg_attr(mobile, tauri::mobile_entry_point)]
 pub fn run() {
     tauri::Builder::default()
+        .plugin(tauri_plugin_window_state::Builder::new().build())
         .plugin(tauri_plugin_http::init())
         .plugin(tauri_plugin_opener::init())
         .plugin(tauri_plugin_store::Builder::default().build())
+        .plugin(tauri_plugin_window_state::Builder::default().build())
         .setup(|app| {
             #[cfg(not(any(target_os = "android", target_os = "ios")))]
             {
@@ -99,7 +155,8 @@ pub fn run() {
                     .app_local_data_dir()
                     .expect("could not resolve app local data path")
                     .join("salt.txt");
-                app.handle().plugin(tauri_plugin_stronghold::Builder::with_argon2(&salt_path).build())?;
+                app.handle()
+                    .plugin(tauri_plugin_stronghold::Builder::with_argon2(&salt_path).build())?;
             }
             // ── Tray ──
             #[cfg(desktop)]
@@ -173,10 +230,7 @@ pub fn run() {
 
             Ok(())
         })
-        .invoke_handler(tauri::generate_handler![
-            open_settings_window,
-            send_message,
-        ])
+        .invoke_handler(tauri::generate_handler![open_settings_window, send_message,])
         .run(tauri::generate_context!())
         .expect("error while running tauri application");
 }

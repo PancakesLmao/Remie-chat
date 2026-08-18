@@ -15,6 +15,7 @@
     "@tauri-apps/plugin-opener": "^2",
     "@tauri-apps/plugin-store": "^2.4.4",
     "@tauri-apps/plugin-stronghold": "~2",
+    "@tauri-apps/plugin-window-state": "~2",
     "dompurify": "^3.4.13",
     "lucide-preact": "^1.28.0",
     "marked": "^18.0.9",

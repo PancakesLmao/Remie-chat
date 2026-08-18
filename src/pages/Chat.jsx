@@ -323,6 +323,8 @@ export default function ChatApp() {
 
   const handleSubmit = async (e) => {
     e.preventDefault();
+    if (streamingIdxRef.current !== null) return;
+    
     const text = input.trim();
     if (!text) return;
 

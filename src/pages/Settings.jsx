@@ -496,7 +496,11 @@ export default function SettingsPage({ onClose }) {
           <div class="setting-item" style={{ cursor: "pointer", userSelect: "none" }} onClick={handleToggleTokenCount}>
             <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center' }}>
               <label style={{ cursor: "pointer", margin: 0 }}>Show Token Count</label>
-              <input type="checkbox" checked={showTokenCount} style={{ margin: 0, cursor: "pointer", width: 'auto' }} readOnly />
+              <label class="toggle-switch" style={{ pointerEvents: 'none' }}>
+                <input type="checkbox" checked={showTokenCount} readOnly />
+                <span class="toggle-track" />
+                <span class="toggle-thumb" />
+              </label>
             </div>
             <div class="settings-hint">Display the total tokens used below the AI's chat bubble.</div>
           </div>

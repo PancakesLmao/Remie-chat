@@ -1,6 +1,6 @@
 {
   "$schema": "https://schema.tauri.app/config/2",
-  "productName": "remie-chat",
+  "productName": "Remie Chat",
   "version": "0.1.0",
   "identifier": "com.pancakes.remie-chat",
   "build": {
@@ -13,7 +13,7 @@
     "windows": [
       {
         "label": "main",
-        "title": "remie-chat",
+        "title": "Remie Chat",
         "width": 340,
         "height": 440,
         "decorations": false,
