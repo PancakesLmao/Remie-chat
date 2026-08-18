@@ -60,4 +60,10 @@ class MainActivity : TauriActivity() {
         }
     }
   }
+
+  override fun onResume() {
+    super.onResume()
+    // Always hide the floating bubble when the app is in the foreground
+    stopService(Intent(this, FloatingWidgetService::class.java))
+  }
 }

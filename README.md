@@ -31,7 +31,7 @@ Remie is a desktop and mobile **interface** for chatting with AI. It sits on you
 
 ### Prerequisites
 
-Install the [prerequisites for your OS](https://tauri.app/start/prerequisites/) before continuing.
+- Install the [prerequisites for your OS](https://tauri.app/start/prerequisites/) before continuing.
 
 ### Setup
 
@@ -62,7 +62,7 @@ C:\Users\<Username>\AppData\Local\Android\Sdk\platform-tools\adb.exe shell pm cl
 - [VS Code](https://code.visualstudio.com/)
 - [Tauri Extension](https://marketplace.visualstudio.com/items?itemName=tauri-apps.tauri-vscode)
 - [rust-analyzer](https://marketplace.visualstudio.com/items?itemName=rust-lang.rust-analyzer)
-
+- [Libsodium Install](https://download.libsodium.org/libsodium/releases/)
 ---
 
 ## Disclaimer

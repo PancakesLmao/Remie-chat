@@ -1,0 +1,14 @@
+{
+  "$schema": "../gen/schemas/desktop-schema.json",
+  "identifier": "desktop-only",
+  "description": "Desktop specific capabilities",
+  "platforms": ["linux", "macOS", "windows"],
+  "windows": [
+    "main",
+    "settings"
+  ],
+  "permissions": [
+    "stronghold:default",
+    "stronghold:allow-remove-store-record"
+  ]
+}

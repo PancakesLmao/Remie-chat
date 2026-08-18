@@ -16,6 +16,16 @@
     "core:window:allow-set-fullscreen",
     "core:window:allow-close",
     "core:window:allow-hide",
-    "store:default"
+    "store:default",
+    "core:path:default",
+    {
+      "identifier": "http:default",
+      "allow": [
+        { "url": "https://api.openai.com/*" },
+        { "url": "https://api.groq.com/*" },
+        { "url": "https://api.anthropic.com/*" },
+        { "url": "https://generativelanguage.googleapis.com/*" }
+      ]
+    }
   ]
 }

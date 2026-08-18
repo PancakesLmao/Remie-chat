@@ -3,6 +3,7 @@ import { getCurrentWindow } from "@tauri-apps/api/window";
 import { emit } from "@tauri-apps/api/event";
 import { invoke } from "@tauri-apps/api/core";
 import { load } from "@tauri-apps/plugin-store";
+import { saveApiKey, deleteApiKey, getProviders } from "../stronghold";
 import { Check, X, Eye, EyeOff, Trash2 } from "lucide-preact";
 import ConfirmDialog from "../components/ConfirmDialog";
 
@@ -209,6 +210,7 @@ export default function SettingsPage({ onClose }) {
   const [activeModel, setActiveModel] = useState("gpt-4o");
   const [temperature, setTemperature] = useState(1.0);
   const [maxTokens, setMaxTokens] = useState(2048);
+  const [showTokenCount, setShowTokenCount] = useState(false);
 
   // Stronghold presence flags (booleans only, no key values)
   const [providers, setProviders] = useState({ openai: false, claude: false, gemini: false, groq: false });
@@ -262,22 +264,43 @@ export default function SettingsPage({ onClose }) {
   // ── Load config from plugin-store on mount ──
   useEffect(() => {
     const init = async () => {
-      const s = await load("config.json", { autoSave: true });
-      setStore(s);
+      try {
+        let name = "Manager", bday = { day: "", month: "", year: "" }, provider = "openai", model = "gpt-4o", temp = 1.0, tokens = 2048, showTokens = false;
 
-      const name = await s.get("userName") ?? "Manager";
-      const bday = await s.get("birthday") ?? { day: "", month: "", year: "" };
-      const provider = await s.get("activeProvider") ?? "openai";
-      const model = await s.get("activeModel") ?? "gpt-4o";
-      const temp = await s.get("temperature") ?? 1.0;
-      const tokens = await s.get("maxTokens") ?? 2048;
+        if (isMobile) {
+          name = localStorage.getItem("remie_config_userName") ?? name;
+          const bdayStr = localStorage.getItem("remie_config_birthday");
+          if (bdayStr) bday = JSON.parse(bdayStr);
+          provider = localStorage.getItem("remie_config_activeProvider") ?? provider;
+          model = localStorage.getItem("remie_config_activeModel") ?? model;
+          const tempStr = localStorage.getItem("remie_config_temperature");
+          if (tempStr) temp = parseFloat(tempStr);
+          const tkStr = localStorage.getItem("remie_config_maxTokens");
+          if (tkStr) tokens = parseInt(tkStr, 10);
+          const stStr = localStorage.getItem("remie_config_showTokenCount");
+          if (stStr) showTokens = stStr === "true";
+        } else {
+          const s = await load("config.json", { autoSave: true });
+          setStore(s);
+          name = await s.get("userName") ?? name;
+          bday = await s.get("birthday") ?? bday;
+          provider = await s.get("activeProvider") ?? provider;
+          model = await s.get("activeModel") ?? model;
+          temp = await s.get("temperature") ?? temp;
+          tokens = await s.get("maxTokens") ?? tokens;
+          showTokens = await s.get("showTokenCount") ?? showTokens;
+        }
 
-      setUserName(name);
-      setBirthday(bday);
-      setActiveProvider(provider);
-      setActiveModel(model);
-      setTemperature(temp);
-      setMaxTokens(tokens);
+        setUserName(name);
+        setBirthday(bday);
+        setActiveProvider(provider);
+        setActiveModel(model);
+        setTemperature(temp);
+        setMaxTokens(tokens);
+        setShowTokenCount(showTokens);
+      } catch (err) {
+        console.error("Failed to load store in settings:", err);
+      }
 
       // Load key presence from Stronghold (boolean flags only)
       refreshProviders();
@@ -287,18 +310,26 @@ export default function SettingsPage({ onClose }) {
 
   const refreshProviders = async () => {
     try {
-      const result = await invoke("get_providers");
+      const result = await getProviders();
       setProviders(result);
     } catch (e) {
-      console.error("get_providers failed:", e);
+      console.error("getProviders failed:", e);
     }
   };
 
   // ── Store setters ──
   const saveToStore = async (key, value) => {
-    if (!store) return;
-    await store.set(key, value);
-    await store.save();
+    if (isMobile) {
+      if (typeof value === "object") {
+        localStorage.setItem("remie_config_" + key, JSON.stringify(value));
+      } else {
+        localStorage.setItem("remie_config_" + key, String(value));
+      }
+    } else {
+      if (!store) return;
+      await store.set(key, value);
+      await store.save();
+    }
   };
 
   const handleSaveUserName = async (val) => {
@@ -344,14 +375,21 @@ export default function SettingsPage({ onClose }) {
     if (isNaN(parsed) || parsed < 1) parsed = 2048;
     setMaxTokens(parsed);
     await saveToStore("maxTokens", parsed);
-    await emit("config:updated", { activeProvider, activeModel, temperature, maxTokens: parsed });
+    await emit("config:updated", { activeProvider, activeModel, temperature, maxTokens: parsed, showTokenCount });
     showToast();
+  };
+
+  const handleToggleTokenCount = async () => {
+    const next = !showTokenCount;
+    setShowTokenCount(next);
+    await saveToStore("showTokenCount", next);
+    await emit("config:updated", { activeProvider, activeModel, temperature, maxTokens, showTokenCount: next });
   };
 
   // ── Stronghold key actions ──
   const handleSaveKey = async (provider, key) => {
     try {
-      await invoke("save_api_key", { provider, key });
+      await saveApiKey(provider.toLowerCase(), key);
       await refreshProviders();
       showToast("Key saved securely!");
     } catch (e) {
@@ -361,7 +399,7 @@ export default function SettingsPage({ onClose }) {
 
   const handleDeleteKey = async (provider) => {
     try {
-      await invoke("delete_api_key", { provider });
+      await deleteApiKey(provider.toLowerCase());
       await refreshProviders();
       showToast("Key removed.");
     } catch (e) {
@@ -446,13 +484,22 @@ export default function SettingsPage({ onClose }) {
           <SaveableInput
             label="Max Tokens"
             type="number"
-            min="1"
-            max="32768"
             value={maxTokens}
-            onSave={handleSaveMaxTokens}
+            min={100}
+            max={8192}
             hint="Max tokens in the response."
+            onSave={handleSaveMaxTokens}
             onDirtyChange={(d) => handleDirty("maxTokens", d)}
           />
+
+          <div class="settings-section-title">Interface</div>
+          <div class="setting-item" style={{ cursor: "pointer", userSelect: "none" }} onClick={handleToggleTokenCount}>
+            <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center' }}>
+              <label style={{ cursor: "pointer", margin: 0 }}>Show Token Count</label>
+              <input type="checkbox" checked={showTokenCount} style={{ margin: 0, cursor: "pointer", width: 'auto' }} readOnly />
+            </div>
+            <div class="settings-hint">Display the total tokens used below the AI's chat bubble.</div>
+          </div>
         </div>
       </div>
 

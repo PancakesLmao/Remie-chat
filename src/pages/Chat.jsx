@@ -3,6 +3,8 @@ import { getCurrentWindow, LogicalSize, LogicalPosition } from "@tauri-apps/api/
 import { listen } from "@tauri-apps/api/event";
 import { invoke } from "@tauri-apps/api/core";
 import { load } from "@tauri-apps/plugin-store";
+import { getApiKey } from "../stronghold";
+import { streamLLM } from "../llmClient";
 import { Maximize2, Minimize2, Minus, AlertTriangle, Settings2, Info, PanelLeft } from "lucide-preact";
 import Sidebar from "../components/Sidebar.jsx";
 import { marked } from "marked";
@@ -68,6 +70,7 @@ export default function ChatApp() {
   const [maxTokens, setMaxTokens] = useState(2048);
   const [thinkingEnabled, setThinkingEnabled] = useState(false);
   const [thinkingEffort, setThinkingEffort] = useState("medium");
+  const [showTokenCount, setShowTokenCount] = useState(false);
   const [thinkingPopoverOpen, setThinkingPopoverOpen] = useState(false);
   const thinkingBtnRef = useRef(null);
   const thinkingTimeoutRef = useRef(null);
@@ -77,31 +80,55 @@ export default function ChatApp() {
   // Load config from plugin-store on mount
   useEffect(() => {
     const isBirthday = (bday) => {
-      if (!bday.month || !bday.day) return false;
+      if (!bday || !bday.month || !bday.day) return false;
       const today = new Date();
       return parseInt(bday.month) === today.getMonth() + 1 &&
              parseInt(bday.day) === today.getDate();
     };
 
     const initStore = async () => {
-      const s = await load("config.json", { autoSave: false });
-      const name = await s.get("userName") ?? "Manager";
-      const bday = await s.get("birthday") ?? { day: "", month: "", year: "" };
-      const provider = await s.get("activeProvider") ?? "openai";
-      const model = await s.get("activeModel") ?? "gpt-4o";
-      const temp = await s.get("temperature") ?? 1.0;
-      const tokens = await s.get("maxTokens") ?? 2048;
-      setUserName(name);
-      setBirthday(bday);
-      setActiveProvider(provider);
-      setActiveModel(model);
-      setTemperature(temp);
-      setMaxTokens(tokens);
+      try {
+        let name = "Manager", bday = { day: "", month: "", year: "" }, provider = "openai", model = "gpt-4o", temp = 1.0, tokens = 2048, showTokens = false;
 
-      const greeting = isBirthday(bday)
-        ? `Happy Birthday, ${name}! It's Remie~ Wishing you a wonderful day today!`
-        : `Hi Manager, It's Remie~`;
-      setMessages([{ role: "ai", text: greeting }]);
+        if (isMobile) {
+          name = localStorage.getItem("remie_config_userName") ?? name;
+          const bdayStr = localStorage.getItem("remie_config_birthday");
+          if (bdayStr) bday = JSON.parse(bdayStr);
+          provider = localStorage.getItem("remie_config_activeProvider") ?? provider;
+          model = localStorage.getItem("remie_config_activeModel") ?? model;
+          const tempStr = localStorage.getItem("remie_config_temperature");
+          if (tempStr) temp = parseFloat(tempStr);
+          const tkStr = localStorage.getItem("remie_config_maxTokens");
+          if (tkStr) tokens = parseInt(tkStr, 10);
+          const stStr = localStorage.getItem("remie_config_showTokenCount");
+          if (stStr) showTokens = stStr === "true";
+        } else {
+          const s = await load("config.json", { autoSave: false });
+          name = await s.get("userName") ?? name;
+          bday = await s.get("birthday") ?? bday;
+          provider = await s.get("activeProvider") ?? provider;
+          model = await s.get("activeModel") ?? model;
+          temp = await s.get("temperature") ?? temp;
+          tokens = await s.get("maxTokens") ?? tokens;
+          showTokens = await s.get("showTokenCount") ?? showTokens;
+        }
+
+        setUserName(name);
+        setBirthday(bday);
+        setActiveProvider(provider);
+        setActiveModel(model);
+        setTemperature(temp);
+        setMaxTokens(tokens);
+        setShowTokenCount(showTokens);
+
+        const greeting = isBirthday(bday)
+          ? `Happy Birthday, ${name}! It's Remie~ Wishing you a wonderful day today!`
+          : `Hi ${name}, It's Remie~`;
+        setMessages([{ role: "ai", text: greeting }]);
+      } catch (err) {
+        console.error("Failed to load store:", err);
+        setMessages([{ role: "ai", text: `Hi Manager, It's Remie~` }]);
+      }
     };
     initStore();
   }, []);
@@ -121,13 +148,12 @@ export default function ChatApp() {
   useEffect(() => {
     let unlisten;
     listen("config:updated", (event) => {
-      const { activeProvider: p, activeModel: m, temperature: t, maxTokens: tk } = event.payload;
+      const { activeProvider: p, activeModel: m, temperature: t, maxTokens: tk, showTokenCount: st } = event.payload;
       if (p) setActiveProvider(p);
       if (m) {
         setActiveModel(m);
         setThinkingEnabled(prev => {
           if (prev && !THINKING_MODELS.has(m)) {
-            // Pop open the toolkit/popover to notify the user
             setTimeout(() => {
               setThinkingPopoverOpen(true);
               setTimeout(() => setThinkingPopoverOpen(false), 3500);
@@ -139,6 +165,7 @@ export default function ChatApp() {
       }
       if (t !== undefined) setTemperature(t);
       if (tk !== undefined) setMaxTokens(tk);
+      if (st !== undefined) setShowTokenCount(st);
     }).then((fn) => { unlisten = fn; });
     return () => { if (unlisten) unlisten(); };
   }, []);
@@ -316,69 +343,126 @@ export default function ChatApp() {
     setInput("");
     setAiState("thinking");
 
+    // Calculate index for the new AI message and set ref synchronously
+    const aiMsgIdx = messages.length + 1;
+    streamingIdxRef.current = aiMsgIdx;
+
     // Add empty AI message bubble for streaming into
-    setMessages((prev) => {
-      streamingIdxRef.current = prev.length;
-      return [...prev, { role: "ai", text: "" }];
-    });
-
-    // Set up stream listeners
-    const unlistenToken = await listen("chat:token", (event) => {
-      setAiState("generating");
-      setMessages((prev) => {
-        const idx = streamingIdxRef.current;
-        if (idx === null) return prev;
-        const next = [...prev];
-        next[idx] = { ...next[idx], text: next[idx].text + event.payload };
-        return next;
-      });
-    });
-
-    const unlistenDone = await listen("chat:done", () => {
-      setAiState("complete");
-      streamingIdxRef.current = null;
-      setTimeout(() => setAiState("waiting_input"), 1500);
-      unlistenToken();
-      unlistenDone();
-      unlistenError();
-    });
-
-    // eslint-disable-next-line prefer-const
-    let unlistenError;
-    unlistenError = await listen("chat:error", (event) => {
-      setMessages((prev) => {
-        const idx = streamingIdxRef.current;
-        if (idx === null) return prev;
-        const next = [...prev];
-        next[idx] = { ...next[idx], text: event.payload, isError: true };
-        return next;
-      });
-      setAiState("waiting_input");
-      streamingIdxRef.current = null;
-      unlistenToken();
-      unlistenDone();
-      unlistenError();
-    });
-
-    const formattedBday = (birthday.day && birthday.month) 
-      ? `${birthday.day}/${birthday.month}${birthday.year ? `/${birthday.year}` : ''}`
-      : "Unknown";
+    setMessages((prev) => [...prev, { role: "ai", text: "" }]);
 
     try {
-      await invoke("send_message", {
-        provider: activeProvider,
-        model: activeModel,
-        messages: history,
-        temperature,
-        maxTokens,
-        thinkingEnabled,
-        reasoningEffort: thinkingEffort,
-        userName,
-        userBday: formattedBday,
-        localTime: new Date().toLocaleString(),
-      });
+      const formattedBday = (birthday.day && birthday.month)
+        ? `${birthday.day}/${birthday.month}${birthday.year ? `/${birthday.year}` : ''}`
+        : "Unknown";
+
+      const apiKey = await getApiKey(activeProvider);
+      if (!apiKey) {
+        throw new Error(`API key for ${activeProvider} is not set. Please add it in Settings.`);
+      }
+
+      if (isMobile) {
+        const totalTokens = await streamLLM({
+          provider: activeProvider,
+          apiKey,
+          model: activeModel,
+          messages: history,
+          temperature,
+          maxTokens,
+          thinkingEnabled,
+          reasoningEffort: thinkingEffort,
+          userName,
+          userBday: formattedBday,
+          localTime: new Date().toLocaleString(),
+          onToken: (token) => {
+            setAiState("generating");
+            setMessages((prev) => {
+              const idx = streamingIdxRef.current;
+              if (idx === null) return prev;
+              const next = [...prev];
+              next[idx] = { ...next[idx], text: next[idx].text + token };
+              return next;
+            });
+          }
+        });
+
+        setMessages((prev) => {
+          const idx = streamingIdxRef.current;
+          if (idx === null) return prev;
+          const next = [...prev];
+          next[idx] = { ...next[idx], tokens: totalTokens };
+          return next;
+        });
+
+        setAiState("complete");
+        streamingIdxRef.current = null;
+        setTimeout(() => setAiState("waiting_input"), 1500);
+
+      } else {
+        // Desktop uses Rust streaming backend to utilize Stronghold vault and proxy
+        const eventId = `chat-stream-${Date.now()}`;
+        const unlisten = await listen(eventId, (e) => {
+          const rawMessage = e.payload;
+          let message = rawMessage;
+          if (typeof rawMessage === "string") {
+            try { message = JSON.parse(rawMessage); } catch(err) {}
+          }
+          
+          if (message.event === "Token") {
+            setAiState("generating");
+            setMessages((prev) => {
+              const idx = streamingIdxRef.current;
+              if (idx === null) return prev;
+              const next = [...prev];
+              next[idx] = { ...next[idx], text: next[idx].text + message.data };
+              return next;
+            });
+          } else if (message.event === "Done") {
+            const tokenCount = message.data;
+            setMessages((prev) => {
+              const idx = streamingIdxRef.current;
+              if (idx === null) return prev;
+              const next = [...prev];
+              next[idx] = { ...next[idx], tokens: tokenCount };
+              return next;
+            });
+            setAiState("complete");
+            streamingIdxRef.current = null;
+            unlisten();
+            setTimeout(() => setAiState("waiting_input"), 1500);
+          } else if (message.event === "Error") {
+            console.error("[Chat] Error:", message.data);
+            setMessages((prev) => {
+              const idx = streamingIdxRef.current;
+              if (idx === null) return prev;
+              const next = [...prev];
+              next[idx] = { ...next[idx], text: message.data, isError: true };
+              return next;
+            });
+            setAiState("waiting_input");
+            streamingIdxRef.current = null;
+            unlisten();
+          }
+        });
+
+        await invoke("send_message", {
+          provider: activeProvider,
+          apiKey: apiKey,
+          model: activeModel,
+          messages: history,
+          temperature,
+          maxTokens,
+          thinkingEnabled,
+          reasoningEffort: thinkingEffort,
+          userName,
+          userBday: formattedBday,
+          localTime: new Date().toLocaleString(),
+          eventId: eventId,
+        });
+      }
+
     } catch (err) {
       // Rust-side error (e.g. no key saved) surfaced here too
+      console.error("[Chat] Sync error:", err);
       setMessages((prev) => {
         const idx = streamingIdxRef.current;
         if (idx === null) return prev;
@@ -388,9 +472,6 @@ export default function ChatApp() {
       });
       setAiState("waiting_input");
       streamingIdxRef.current = null;
-      unlistenToken();
-      unlistenDone();
-      unlistenError();
     }
   };
 
@@ -509,9 +590,14 @@ export default function ChatApp() {
                 if (!msg.text && !msg.isError) return null;
                 const html = DOMPurify.sanitize(marked.parse(msg.text || ""));
                 return (
-                  <div key={idx} class={`msg ${msg.role}${msg.isError ? ' error' : ''}`}>
-                    {msg.isError && <AlertTriangle size={14} style={{ flexShrink: 0, marginTop: '1px' }} />}
-                    <div class="markdown-body" dangerouslySetInnerHTML={{ __html: html }} />
+                  <div key={idx} class="msg-wrapper">
+                    <div class={`msg ${msg.role}${msg.isError ? ' error' : ''}`}>
+                      {msg.isError && <AlertTriangle size={14} style={{ flexShrink: 0, marginTop: '1px' }} />}
+                      <div class="markdown-body" dangerouslySetInnerHTML={{ __html: html }} />
+                    </div>
+                    {msg.role === "ai" && showTokenCount && msg.tokens > 0 && (
+                      <div class="token-count">Tokens used: {msg.tokens}</div>
+                    )}
                   </div>
                 );
               })}
