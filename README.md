@@ -93,4 +93,5 @@ Once the build successfully completes, you will find the executable installers a
 
 ## Disclaimer
 
-These mascot assets are from a web event by **Zenless Zone Zero**. These assets are not original work and are used here for decorative an entertainment purposes only. All assets belong to Hoyoverse/Cognosphere.
+These mascot assets are from a web event by **Zenless Zone Zero** and editted by [Ninetailed-Vixen](https://www.reddit.com/r/ZZZ_Official/comments/1v0648a/more_web_event_transparent_remielle_emotes/).
+These assets are not original work and are used here for decorative an entertainment purposes only. All assets belong to Hoyoverse/Cognosphere.
