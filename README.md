@@ -14,16 +14,29 @@
 
 Remie is a desktop and mobile **interface** for chatting with AI. It sits on your screen as a compact chatbox, or collapses down to a simple animated icon that reacts to what you're doing.
 
+## Supported Platforms
+
+| Platform | Status | Notes |
+| :--- | :--- | :--- |
+| **Windows** | ✅ Supported | Fully supported native desktop app |
+| **Linux** | ✅ Supported | Fully supported native desktop app |
+| **Android** | ⚠️ Dev Only | App builds and runs, but Secure Storage is not yet fully available on mobile |
+| **macOS** | ❌ Not Yet | Planning |
+
 ## Storage & Config
 
-**API keys** are stored securely and locally on your machine, using your operating system's native credential vault. They are never written in plain text and never leave your device except to call the AI provider you've connected directly.
+**API keys** are stored securely and locally on your machine. However, the level of security differs by platform:
+- **Desktop (Windows, macOS, Linux):** API keys are encrypted at rest using [Tauri Stronghold](https://v2.tauri.app/plugin/stronghold/), which uses your operating system's native credential vault for hardware-backed security.
+- **Mobile (Android):** Due to current plugin limitations on mobile, API keys are saved to `localStorage`. We apply basic WebCrypto obfuscation to prevent trivial plaintext inspection via DevTools, but **this does not provide real security against a determined attacker with device access**. Please be aware of this platform security gap when using your own keys on a mobile device.
+
+Keys are never transmitted anywhere except directly to the AI provider you've connected.
 
 **Other settings** (generation parameters, profile/persona settings) are saved via the Tauri plugin-store, written to a `config.json` file in your OS's AppData directory:
 
 | OS | Location |
 |---|---|
-| Windows | `C:\Users\<User>\AppData\Local\<App Identifier>\config.json` (or `Roaming`) |
-| Android | `N/A` |
+| Windows | `C:\Users\<User>\AppData\Roaming\com.pancakes.remie-chat\config.json` |
+| Linux | `~/.local/share/com.pancakes.remie-chat/config.json` |
 
 ---
 
@@ -67,4 +80,4 @@ C:\Users\<Username>\AppData\Local\Android\Sdk\platform-tools\adb.exe shell pm cl
 
 ## Disclaimer
 
-The mascot assets are from a web event by **Zenless Zone Zero**. These assets are not original work and are used here for decorative an entertainment purposes only.
+These mascot assets are from a web event by **Zenless Zone Zero**. These assets are not original work and are used here for decorative an entertainment purposes only. All assets belong to Hoyoverse/Cognosphere.
