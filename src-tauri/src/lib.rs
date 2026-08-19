@@ -121,6 +121,11 @@ async fn send_message(
     }
 }
 
+#[tauri::command]
+async fn fetch_models(provider: String, api_key: String) -> Result<Vec<String>, String> {
+    llm::fetch_models(provider, api_key).await
+}
+
 #[cfg(desktop)]
 fn show_settings(app_handle: &tauri::AppHandle) {
     if let Some(window) = app_handle.get_webview_window("settings") {
@@ -230,7 +235,7 @@ pub fn run() {
 
             Ok(())
         })
-        .invoke_handler(tauri::generate_handler![open_settings_window, send_message,])
+        .invoke_handler(tauri::generate_handler![open_settings_window, send_message, fetch_models])
         .run(tauri::generate_context!())
         .expect("error while running tauri application");
 }

@@ -7,7 +7,7 @@ import { saveApiKey, deleteApiKey, getProviders } from "../stronghold";
 import { Check, X, Eye, EyeOff, Trash2 } from "lucide-preact";
 import ConfirmDialog from "../components/ConfirmDialog";
 import Loading from "../components/Loading.jsx";
-import { fetchAndCacheModels } from "../models.js";
+import { fetchAndCacheModels } from "../api/models.js";
 
 // ─── Toast ────────────────────────────────────────────────────────────────────
 

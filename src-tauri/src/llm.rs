@@ -442,3 +442,63 @@ pub async fn stream_gemini(
     let _ = app_handle.emit(&event_id, ChatEvent::Done(token_count));
     Ok(())
 }
+
+pub async fn fetch_models(provider: String, api_key: String) -> Result<Vec<String>, String> {
+    let client = tauri_plugin_http::reqwest::Client::builder()
+        .timeout(std::time::Duration::from_secs(10))
+        .build()
+        .map_err(|e| e.to_string())?;
+
+    let url: String;
+    let mut headers = tauri_plugin_http::reqwest::header::HeaderMap::new();
+
+    match provider.as_str() {
+        "openai" => {
+            url = "https://api.openai.com/v1/models".to_string();
+            headers.insert("Authorization", format!("Bearer {}", api_key).parse().unwrap());
+        }
+        "groq" => {
+            url = "https://api.groq.com/openai/v1/models".to_string();
+            headers.insert("Authorization", format!("Bearer {}", api_key).parse().unwrap());
+        }
+        "gemini" => {
+            url = format!("https://generativelanguage.googleapis.com/v1beta/models?key={}", api_key);
+        }
+        "claude" => {
+            return Ok(vec![]);
+        }
+        _ => return Err(format!("Unknown provider {}", provider)),
+    }
+
+    let response = client.get(&url).headers(headers).send().await.map_err(|e| e.to_string())?;
+
+    if !response.status().is_success() {
+        return Err(format!("{} error {}", provider, response.status().as_u16()));
+    }
+
+    let body = response.text().await.map_err(|e| e.to_string())?;
+    let json: serde_json::Value = serde_json::from_str(&body).map_err(|e| e.to_string())?;
+
+    let mut models = vec![];
+
+    if provider == "openai" || provider == "groq" {
+        if let Some(data) = json.get("data").and_then(|d| d.as_array()) {
+            for item in data {
+                if let Some(id) = item.get("id").and_then(|i| i.as_str()) {
+                    models.push(id.to_string());
+                }
+            }
+        }
+    } else if provider == "gemini" {
+        if let Some(data) = json.get("models").and_then(|d| d.as_array()) {
+            for item in data {
+                if let Some(name) = item.get("name").and_then(|n| n.as_str()) {
+                    models.push(name.replace("models/", "").to_string());
+                }
+            }
+        }
+    }
+
+    models.sort();
+    Ok(models)
+}

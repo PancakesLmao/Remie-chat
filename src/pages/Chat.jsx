@@ -4,7 +4,7 @@ import { listen } from "@tauri-apps/api/event";
 import { invoke } from "@tauri-apps/api/core";
 import { load } from "@tauri-apps/plugin-store";
 import { getApiKey } from "../stronghold";
-import { streamLLM } from "../llmClient";
+import { streamLLM } from "../api/llmClient";
 import { Maximize2, Minimize2, Minus, AlertTriangle, Settings2, Info, PanelLeft } from "lucide-preact";
 import Sidebar from "../components/Sidebar.jsx";
 import { marked } from "marked";

@@ -3,7 +3,7 @@ import "./App.css";
 import SettingsPage from "./pages/Settings.jsx";
 import ChatApp from "./pages/Chat.jsx";
 import Loading from "./components/Loading.jsx";
-import { fetchAndCacheModels } from "./models.js";
+import { fetchAndCacheModels } from "./api/models.js";
 import { load as storeLoad } from '@tauri-apps/plugin-store';
 
 // Detect which page this window should render on desktop
