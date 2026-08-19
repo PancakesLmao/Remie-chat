@@ -46,6 +46,14 @@ Keys are never transmitted anywhere except directly to the AI provider you've co
 
 - Install the [prerequisites for your OS](https://tauri.app/start/prerequisites/) before continuing.
 
+#### Recommended IDE Setup
+
+- [VS Code](https://code.visualstudio.com/)
+- [Tauri Extension](https://marketplace.visualstudio.com/items?itemName=tauri-apps.tauri-vscode)
+- [rust-analyzer](https://marketplace.visualstudio.com/items?itemName=rust-lang.rust-analyzer)
+- [Libsodium Install](https://download.libsodium.org/libsodium/releases/)
+---
+
 ### Setup
 
 ```bash
@@ -70,13 +78,18 @@ Clean up emulator:
 C:\Users\<Username>\AppData\Local\Android\Sdk\platform-tools\adb.exe shell pm clear com.pancakes.remie_chat
 ```
 
-### Recommended IDE Setup
+### Building
 
-- [VS Code](https://code.visualstudio.com/)
-- [Tauri Extension](https://marketplace.visualstudio.com/items?itemName=tauri-apps.tauri-vscode)
-- [rust-analyzer](https://marketplace.visualstudio.com/items?itemName=rust-lang.rust-analyzer)
-- [Libsodium Install](https://download.libsodium.org/libsodium/releases/)
----
+To build the application for release on your current platform:
+
+```bash
+pnpm tauri build
+```
+
+Once the build successfully completes, you will find the executable installers and bundled files located in:
+- **Windows (`.exe`, `.msi`)**: `src-tauri/target/release/bundle/nsis/`
+- **Linux (`.AppImage`, `.deb`)**: `src-tauri/target/release/bundle/`
+- **macOS (`.dmg`, `.app`)**: `src-tauri/target/release/bundle/macos/`
 
 ## Disclaimer
 
