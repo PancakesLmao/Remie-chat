@@ -137,6 +137,16 @@ async fn stream_openai_compat(
                     break;
                 }
                 if let Ok(json) = serde_json::from_str::<serde_json::Value>(data) {
+                    if let Some(error) = json.get("error") {
+                        let err_msg = error
+                            .get("message")
+                            .and_then(|m| m.as_str())
+                            .unwrap_or("Unknown SSE error")
+                            .to_string();
+                        let _ = app_handle.emit(&event_id, ChatEvent::Error(err_msg));
+                        return Ok(());
+                    }
+
                     if let Some(token) = json["choices"][0]["delta"]["content"].as_str() {
                         token_count += 1;
                         let _ = app_handle.emit(&event_id, ChatEvent::Token(token.to_string()));

@@ -6,6 +6,8 @@ import { load } from "@tauri-apps/plugin-store";
 import { saveApiKey, deleteApiKey, getProviders } from "../stronghold";
 import { Check, X, Eye, EyeOff, Trash2 } from "lucide-preact";
 import ConfirmDialog from "../components/ConfirmDialog";
+import Loading from "../components/Loading.jsx";
+import { fetchAndCacheModels } from "../models.js";
 
 // ─── Toast ────────────────────────────────────────────────────────────────────
 
@@ -178,25 +180,7 @@ function ApiKeyInput({ provider, hasKey, onSave, onDelete, onDirtyChange }) {
 
 // ─── Models per provider ──────────────────────────────────────────────────────
 
-const PROVIDER_MODELS = {
-  openai: ["gpt-4o", "gpt-4o-mini", "gpt-4-turbo", "gpt-3.5-turbo"],
-  claude: ["claude-opus-4-5", "claude-sonnet-4-5", "claude-haiku-4-5"],
-  gemini: ["gemini-2.0-flash", "gemini-2.0-flash-lite", "gemini-1.5-pro"],
-  groq:   [
-    "llama-3.3-70b-versatile",
-    "llama-3.1-8b-instant",
-    "openai/gpt-oss-120b",
-    "openai/gpt-oss-20b",
-    "openai/gpt-oss-safeguard-20b",
-    "qwen/qwen3.6-27b",
-    "groq/compound",
-    "groq/compound-mini",
-    "meta-llama/llama-prompt-guard-2-22m",
-    "meta-llama/llama-prompt-guard-2-86m",
-    "whisper-large-v3",
-    "whisper-large-v3-turbo"
-  ],
-};
+// Removed PROVIDER_MODELS - Now dynamically fetched via models.js
 
 // ─── SettingsPage ─────────────────────────────────────────────────────────────
 
@@ -211,6 +195,9 @@ export default function SettingsPage({ onClose }) {
   const [temperature, setTemperature] = useState(1.0);
   const [maxTokens, setMaxTokens] = useState(2048);
   const [showTokenCount, setShowTokenCount] = useState(false);
+  const [providerModels, setProviderModels] = useState([]);
+  const [isLoadingModels, setIsLoadingModels] = useState(false);
+  const [loadingText] = useState("Loading...");
 
   // Stronghold presence flags (booleans only, no key values)
   const [providers, setProviders] = useState({ openai: false, claude: false, gemini: false, groq: false });
@@ -298,6 +285,10 @@ export default function SettingsPage({ onClose }) {
         setTemperature(temp);
         setMaxTokens(tokens);
         setShowTokenCount(showTokens);
+        
+        // Fetch models for active provider
+        const models = await fetchAndCacheModels(provider);
+        setProviderModels(models);
       } catch (err) {
         console.error("Failed to load store in settings:", err);
       }
@@ -349,11 +340,23 @@ export default function SettingsPage({ onClose }) {
   const handleProviderChange = async (e) => {
     const p = e.target.value;
     setActiveProvider(p);
-    const defaultModel = PROVIDER_MODELS[p][0];
+    
+    setIsLoadingModels(true);
+    
+    const models = await fetchAndCacheModels(p);
+    setProviderModels(models);
+    
+    let defaultModel = models.length > 0 ? models[0] : "";
+    if (models.includes(activeModel)) {
+      defaultModel = activeModel; // keep current if exists
+    }
+    
     setActiveModel(defaultModel);
     await saveToStore("activeProvider", p);
     await saveToStore("activeModel", defaultModel);
     await emit("config:updated", { activeProvider: p, activeModel: defaultModel, temperature, maxTokens });
+    
+    setIsLoadingModels(false);
   };
 
   const handleModelChange = async (e) => {
@@ -452,7 +455,7 @@ export default function SettingsPage({ onClose }) {
             <label>Model</label>
             <div class="input-row">
               <select value={activeModel} onChange={handleModelChange}>
-                {(PROVIDER_MODELS[activeProvider] ?? []).map((m) => (
+                {(providerModels || []).map((m) => (
                   <option key={m} value={m}>{m}</option>
                 ))}
               </select>
@@ -518,6 +521,7 @@ export default function SettingsPage({ onClose }) {
       />
 
       <Toast message={toastMsg} visible={toastVisible} isError={toastIsError} onHide={() => setToastVisible(false)} />
+      {isLoadingModels && <Loading text={loadingText} />}
     </div>
   );
 }
