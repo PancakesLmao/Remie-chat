@@ -16,23 +16,13 @@
         "title": "Remie Chat",
         "width": 340,
         "height": 440,
+        "minWidth": 280,
+        "minHeight": 360,
         "decorations": false,
         "transparent": true,
         "shadow": false,
-        "resizable": false,
-        "skipTaskbar": true
-      },
-      {
-        "label": "settings",
-        "title": "Remie – Settings",
-        "url": "/?page=settings",
-        "width": 600,
-        "height": 720,
-        "decorations": true,
-        "transparent": false,
-        "alwaysOnTop": false,
         "resizable": true,
-        "visible": false
+        "skipTaskbar": true
       }
     ],
     "security": {

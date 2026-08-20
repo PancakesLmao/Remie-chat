@@ -5,7 +5,7 @@ import { invoke } from "@tauri-apps/api/core";
 import { load } from "@tauri-apps/plugin-store";
 import { getApiKey } from "../stronghold";
 import { streamLLM } from "../api/llmClient";
-import { Maximize2, Minimize2, Minus, AlertTriangle, Settings2, Info, PanelLeft } from "lucide-preact";
+import { Maximize2, Minimize2, Minus, AlertTriangle, Settings2, Info, PanelLeft, X } from "lucide-preact";
 import Sidebar from "../components/Sidebar.jsx";
 import { marked } from "marked";
 import DOMPurify from "dompurify";
@@ -70,6 +70,7 @@ export default function ChatApp() {
   const [activeProvider, setActiveProvider] = useState("openai");
   const [activeModel, setActiveModel] = useState("gpt-4o");
   const [isFullscreen, setIsFullscreen] = useState(false);
+  const [showSidebar, setShowSidebar] = useState(false);
   const [temperature, setTemperature] = useState(1.0);
   const [maxTokens, setMaxTokens] = useState(2048);
   const [thinkingEnabled, setThinkingEnabled] = useState(false);
@@ -179,7 +180,7 @@ export default function ChatApp() {
     if (chatAreaRef.current) {
       chatAreaRef.current.scrollTop = chatAreaRef.current.scrollHeight;
     }
-  }, [messages]);
+  }, [messages, isFullscreen]);
 
   // Event delegation for copy buttons
   useEffect(() => {
@@ -243,24 +244,44 @@ export default function ChatApp() {
     }
   };
 
+  const isInitialMount = useRef(true);
+
   // Window resizing based on mode
   useEffect(() => {
+    if (isInitialMount.current) {
+      isInitialMount.current = false;
+      return;
+    }
     const resizeWindow = async () => {
       if (isMobile) return;
       try {
         const win = getCurrentWindow();
         await win.setAlwaysOnTop(true);
         if (mode === "widget") {
+          const size = await win.outerSize();
+          const scale = await win.scaleFactor();
+          const logical = size.toLogical(scale);
+          localStorage.setItem("remie_chatbox_width", logical.width);
+          localStorage.setItem("remie_chatbox_height", logical.height);
+
+          try { await win.setMinSize(null); } catch(e){}
+          try { await win.setResizable(false); } catch(e){}
           await resizeAnchored(win, 200, 200);
         } else {
-          await resizeAnchored(win, 360, 420);
+          let w = parseInt(localStorage.getItem("remie_chatbox_width")) || 360;
+          let h = parseInt(localStorage.getItem("remie_chatbox_height")) || 420;
+          w = Math.max(w, 280);
+          h = Math.max(h, 360);
+          try { await win.setMinSize(new LogicalSize(280, 360)); } catch(e){}
+          await resizeAnchored(win, w, h);
+          try { await win.setResizable(true); } catch(e){}
         }
       } catch (err) {
         console.error("Failed to resize window", err);
       }
     };
     resizeWindow();
-  }, [mode]);
+  }, [mode, isMobile]);
 
   // Window & Global keypress listener
   const typingTimeoutRef = useRef(null);
@@ -485,9 +506,9 @@ export default function ChatApp() {
     const win = getCurrentWindow();
     const full = !isFullscreen;
     if (full) {
-      await resizeAnchored(win, 800, 720);
+      await win.maximize();
     } else {
-      await resizeAnchored(win, 360, 420);
+      try { await win.unmaximize(); } catch (e) {}
     }
     setIsFullscreen(full);
   };
@@ -497,23 +518,30 @@ export default function ChatApp() {
     setMode("widget");
   };
 
+  const closeApp = async () => {
+    try {
+      await invoke("exit_app");
+    } catch (e) {
+      console.error(e);
+    }
+  };
+
   const getStatusDotClass = () => {
     if (aiState === 'waiting_input') return 'waiting';
     return aiState;
   };
 
-  const openSettings = async () => {
-    const isMobileDevice = /Android|webOS|iPhone|iPad|iPod/i.test(navigator.userAgent) || (window.__TAURI_INTERNALS__ && ["android", "ios"].includes(window.__TAURI_INTERNALS__.platform));
-    if (isMobileDevice) {
-      window.location.hash = "settings";
-    } else {
-      try {
-        await invoke('open_settings_window');
-      } catch (e) {
-        window.location.hash = "settings";
-      }
-    }
+  const openSettings = () => {
+    setShowSidebar(false);
+    window.location.hash = "settings";
   };
+
+  const isOverlaySidebar = isMobile || !isFullscreen;
+  const chatModeClass = [
+    isFullscreen ? 'full' : '',
+    isOverlaySidebar ? 'with-overlay-sidebar' : '',
+    showSidebar ? 'sidebar-open' : ''
+  ].filter(Boolean).join(' ');
 
   return (
     <div id="remie-root">
@@ -522,19 +550,19 @@ export default function ChatApp() {
           id="icon-mode"
           class={`state-${aiState}`}
           data-tauri-drag-region
-          onClick={() => setMode("chatbox")}
-          title="Click to open chat"
+          onDblClick={() => setMode("chatbox")}
+          title="Double click to open chat"
         >
           <div class="icon-ring" data-tauri-drag-region></div>
           {renderMascots(true)}
           <div class={`status-dot ${getStatusDotClass()}`} data-tauri-drag-region></div>
         </div>
       ) : (
-        <div id="chat-mode" class={isFullscreen ? 'full' : ''}>
+        <div id="chat-mode" class={chatModeClass}>
 
-          {/* Mobile backdrop for closing sidebar */}
-          {isFullscreen && isMobile && (
-            <div class="sidebar-backdrop" onClick={() => setIsFullscreen(false)}></div>
+          {/* Backdrop for closing overlay sidebar */}
+          {isOverlaySidebar && showSidebar && (
+            <div class="sidebar-backdrop" onClick={() => setShowSidebar(false)}></div>
           )}
 
           {/* Mascot side panel */}
@@ -544,23 +572,25 @@ export default function ChatApp() {
             userName={userName}
             renderMascots={renderMascots}
             openSettings={openSettings}
-            closeSidebar={() => setIsFullscreen(false)}
+            closeSidebar={() => setShowSidebar(false)}
+            isOverlaySidebar={isOverlaySidebar}
           />
 
           {/* Main chat panel */}
           <div class="chat-content-panel">
             <div
               id="chat-header"
-              data-tauri-drag-region
-              onPointerDown={(e) => {
+              onMouseDown={(e) => {
                 if (e.button === 0 && !e.target.closest('.header-btn')) {
-                  getCurrentWindow().startDragging();
+                  // Only drag if it's a single click
+                  if (e.detail > 1) return;
+                  getCurrentWindow().startDragging().catch(err => console.error("Drag error:", err));
                 }
               }}
             >
-              {/* Mobile Sidebar Button (Back button style) */}
-              {isMobile && (
-                <div class="header-btn" title="Show side panel" onClick={toggleFullscreen}>
+              {/* Sidebar Button */}
+              {isOverlaySidebar && (
+                <div class="header-btn" title="Show side panel" onClick={() => setShowSidebar(true)}>
                   <PanelLeft size={18} />
                 </div>
               )}
@@ -576,17 +606,24 @@ export default function ChatApp() {
                 </div>
               </div>
 
-              {/* Desktop Expand Button */}
+              {/* Icon mode button - Desktop only (Minimize) */}
               {!isMobile && (
-                <div class="header-btn" title={isFullscreen ? "Collapse" : "Expand"} onClick={toggleFullscreen}>
+                <div class="header-btn" title="Icon mode" onClick={toIconMode}>
+                  <Minus size={16} />
+                </div>
+              )}
+
+              {/* Desktop Expand Button (Maximize) */}
+              {!isMobile && (
+                <div class="header-btn" title={isFullscreen ? "Restore" : "Maximize"} onClick={toggleFullscreen}>
                   {isFullscreen ? <Minimize2 size={16} /> : <Maximize2 size={16} />}
                 </div>
               )}
 
-              {/* Icon mode button - Desktop only */}
+              {/* Close app button */}
               {!isMobile && (
-                <div class="header-btn" title="Icon mode" onClick={toIconMode}>
-                  <Minus size={16} />
+                <div class="header-btn close-btn" title="Close" onClick={closeApp}>
+                  <X size={16} />
                 </div>
               )}
             </div>

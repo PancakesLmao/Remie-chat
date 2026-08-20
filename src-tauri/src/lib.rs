@@ -7,31 +7,11 @@ use tauri::menu::{Menu, MenuItem};
 #[cfg(desktop)]
 use tauri::tray::{MouseButton, MouseButtonState, TrayIconBuilder, TrayIconEvent};
 use tauri::Manager;
+use tauri::Emitter;
 
 mod llm;
 // OS handles encryption at rest
 
-#[tauri::command]
-fn open_settings_window(_app: tauri::AppHandle) {
-    #[cfg(not(any(target_os = "android", target_os = "ios")))]
-    {
-        if let Some(window) = _app.get_webview_window("settings") {
-            let _ = window.show();
-            let _ = window.set_focus();
-        } else {
-            let _ = tauri::WebviewWindowBuilder::new(
-                &_app,
-                "settings",
-                tauri::WebviewUrl::App("/?page=settings".into()),
-            )
-            .title("Remie – Settings")
-            .inner_size(600.0, 720.0)
-            .resizable(true)
-            .visible(true)
-            .build();
-        }
-    }
-}
 
 #[tauri::command]
 async fn send_message(
@@ -126,13 +106,6 @@ async fn fetch_models(provider: String, api_key: String) -> Result<Vec<String>, 
     llm::fetch_models(provider, api_key).await
 }
 
-#[cfg(desktop)]
-fn show_settings(app_handle: &tauri::AppHandle) {
-    if let Some(window) = app_handle.get_webview_window("settings") {
-        let _ = window.show();
-        let _ = window.set_focus();
-    }
-}
 
 #[cfg(desktop)]
 fn show_main(app_handle: &tauri::AppHandle) {
@@ -140,6 +113,11 @@ fn show_main(app_handle: &tauri::AppHandle) {
         let _ = window.show();
         let _ = window.set_focus();
     }
+}
+
+#[tauri::command]
+fn exit_app(app_handle: tauri::AppHandle) {
+    app_handle.exit(0);
 }
 
 // App entry
@@ -180,7 +158,10 @@ pub fn run() {
                     .on_menu_event(|app_handle, event| match event.id.as_ref() {
                         "quit" => app_handle.exit(0),
                         "open" => show_main(app_handle),
-                        "settings" => show_settings(app_handle),
+                        "settings" => {
+                            show_main(app_handle);
+                            let _ = app_handle.emit("open-settings", ());
+                        }
                         _ => {}
                     })
                     .on_tray_icon_event(|tray, event| {
@@ -199,23 +180,6 @@ pub fn run() {
                     .build(app)?;
             }
 
-            // On mobile, close settings window if Tauri instantiated it from tauri.conf.json
-            #[cfg(mobile)]
-            if let Some(settings_win) = app.get_webview_window("settings") {
-                let _ = settings_win.close();
-            }
-
-            // On desktop, intercept settings window close — hide instead of destroy
-            #[cfg(desktop)]
-            if let Some(settings_win) = app.get_webview_window("settings") {
-                let win_clone = settings_win.clone();
-                settings_win.on_window_event(move |event| {
-                    if let tauri::WindowEvent::CloseRequested { api, .. } = event {
-                        api.prevent_close();
-                        let _ = win_clone.hide();
-                    }
-                });
-            }
 
             // ── Global keyboard hook (existing feature) ──
             #[cfg(any(target_os = "windows", target_os = "macos", target_os = "linux"))]
@@ -235,7 +199,7 @@ pub fn run() {
 
             Ok(())
         })
-        .invoke_handler(tauri::generate_handler![open_settings_window, send_message, fetch_models])
+        .invoke_handler(tauri::generate_handler![send_message, fetch_models, exit_app])
         .run(tauri::generate_context!())
         .expect("error while running tauri application");
 }

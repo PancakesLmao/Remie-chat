@@ -12,6 +12,27 @@
   --shadow: 0 10px 30px rgba(150,90,110,.18);
 }
 *{box-sizing:border-box;}
+
+/* ─── Global Scrollbar (App Default) ─── */
+* {
+  scrollbar-width: thin;
+  scrollbar-color: var(--lav) transparent;
+}
+*::-webkit-scrollbar {
+  width: 6px;
+  height: 6px;
+}
+*::-webkit-scrollbar-track {
+  background: transparent;
+}
+*::-webkit-scrollbar-thumb {
+  background: var(--lav);
+  border-radius: 99px;
+}
+*::-webkit-scrollbar-thumb:hover {
+  background: var(--lav-deep);
+}
+
 html,body, #root{
   width:100%; height:100%; margin:0;
   font-family:'Outfit', 'Segoe UI', sans-serif;
@@ -93,7 +114,6 @@ body.settings-page, body.settings-page #root {
 #chat-mode{
   width: 100%;
   height: 100%;
-  max-width: 800px;
   background:var(--cream);
   border:2.5px solid var(--line);
   border-radius:22px;
@@ -107,6 +127,7 @@ body.settings-page, body.settings-page #root {
 #chat-mode.full{
   width: 100%;
   height: 100%;
+  max-width: none;
   border-radius:18px;
   flex-direction: row;
 }
@@ -130,7 +151,7 @@ body.settings-page, body.settings-page #root {
 }
 .mascot-side-panel:active { cursor: grabbing; }
 
-/* Mobile Sidebar Slide-in Drawer */
+/* Mobile layout resets */
 body.mobile-device #chat-mode {
   border: none;
   border-radius: 0;
@@ -140,7 +161,9 @@ body.mobile-device #chat-mode {
 body.mobile-device #chat-mode.full {
   flex-direction: column; /* keep right side full width */
 }
-body.mobile-device .mascot-side-panel {
+
+/* Sidebar Slide-in Drawer */
+#chat-mode.with-overlay-sidebar .mascot-side-panel {
   display: flex; /* always block rendered but offscreen */
   position: absolute;
   top: 0;
@@ -148,14 +171,14 @@ body.mobile-device .mascot-side-panel {
   bottom: 0;
   height: 100%;
   width: 75%;
-  max-width: 300px;
+  max-width: 240px;
   z-index: 100;
   transform: translateX(-100%);
   transition: transform 0.3s cubic-bezier(0.2, 0.8, 0.2, 1);
   box-shadow: 4px 0 24px rgba(60,40,60,.15);
   cursor: default;
 }
-body.mobile-device #chat-mode.full .mascot-side-panel {
+#chat-mode.with-overlay-sidebar.sidebar-open .mascot-side-panel {
   transform: translateX(0);
 }
 .sidebar-backdrop {
@@ -304,11 +327,17 @@ body.mobile-device #chat-mode.full .mascot-side-panel {
   padding:12px;
   display:flex; flex-direction:column; gap:10px;
   min-height: 0;
-  -ms-overflow-style: none;
-  scrollbar-width: none;
 }
-#chat-body::-webkit-scrollbar {
-  display: none;
+
+/* Chat-specific scrollbar color override */
+#chat-body {
+  scrollbar-color: var(--pink-mid) transparent;
+}
+#chat-body::-webkit-scrollbar-thumb {
+  background: var(--pink-mid);
+}
+#chat-body::-webkit-scrollbar-thumb:hover {
+  background: var(--pink-deep);
 }
 .msg{
   flex-shrink: 0;
@@ -415,15 +444,11 @@ body.mobile-device #chat-mode.full .mascot-side-panel {
   max-width: 100%;
   padding-bottom: 5px;
 }
-.katex-display::-webkit-scrollbar {
-  height: 6px;
-}
-.katex-display::-webkit-scrollbar-track {
-  background: transparent;
+.katex-display {
+  scrollbar-color: var(--pink-mid) transparent;
 }
 .katex-display::-webkit-scrollbar-thumb {
   background: var(--pink-mid);
-  border-radius: 99px;
 }
 .katex-display::-webkit-scrollbar-thumb:hover {
   background: var(--pink-deep);
