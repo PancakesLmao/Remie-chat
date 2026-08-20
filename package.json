@@ -17,8 +17,10 @@
     "@tauri-apps/plugin-stronghold": "~2",
     "@tauri-apps/plugin-window-state": "~2",
     "dompurify": "^3.4.13",
+    "katex": "^0.18.4",
     "lucide-preact": "^1.28.0",
     "marked": "^18.0.9",
+    "marked-katex-extension": "^5.1.11",
     "preact": "^10.25.1"
   },
   "devDependencies": {

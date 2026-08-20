@@ -9,6 +9,8 @@ import { Maximize2, Minimize2, Minus, AlertTriangle, Settings2, Info, PanelLeft 
 import Sidebar from "../components/Sidebar.jsx";
 import { marked } from "marked";
 import DOMPurify from "dompurify";
+import markedKatex from "marked-katex-extension";
+import "katex/dist/katex.min.css";
 
 function escapeHtml(text) {
   return text
@@ -31,6 +33,8 @@ marked.use({
     }
   }
 });
+
+marked.use(markedKatex({ throwOnError: false, displayMode: true }));
 
 // Assets
 import remieGen from "../assets/remie_gen.gif";
@@ -590,7 +594,16 @@ export default function ChatApp() {
             <div id="chat-body" ref={chatAreaRef}>
               {messages.map((msg, idx) => {
                 if (!msg.text && !msg.isError) return null;
-                const html = DOMPurify.sanitize(marked.parse(msg.text || ""));
+                let textToParse = msg.text || "";
+                // Convert \[ ... \] to $$ ... $$
+                textToParse = textToParse.replace(/\\\[([\s\S]*?)\\\]/g, "$$$$$1$$$$");
+                // Convert \( ... \) to $ ... $
+                textToParse = textToParse.replace(/\\\(([\s\S]*?)\\\)/g, "$$$1$$");
+                
+                const html = DOMPurify.sanitize(marked.parse(textToParse), {
+                  ADD_TAGS: ['math', 'annotation', 'semantics', 'mrow', 'mi', 'mn', 'mo', 'ms', 'mspace', 'mtext', 'menclose', 'merror', 'mfenced', 'mfrac', 'mpadded', 'mphantom', 'mroot', 'msqrt', 'mstyle', 'mmultiscripts', 'mover', 'mprescripts', 'msub', 'msubsup', 'msup', 'munder', 'munderover', 'none', 'annotation-xml'],
+                  ADD_ATTR: ['target', 'class', 'style']
+                });
                 return (
                   <div key={idx} class="msg-wrapper">
                     <div class={`msg ${msg.role}${msg.isError ? ' error' : ''}`}>

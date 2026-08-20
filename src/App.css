@@ -409,6 +409,25 @@ body.mobile-device #chat-mode.full .mascot-side-panel {
   background: rgba(58, 46, 60, 0.05);
   font-weight: 700;
 }
+.katex-display {
+  overflow-x: auto;
+  overflow-y: hidden;
+  max-width: 100%;
+  padding-bottom: 5px;
+}
+.katex-display::-webkit-scrollbar {
+  height: 6px;
+}
+.katex-display::-webkit-scrollbar-track {
+  background: transparent;
+}
+.katex-display::-webkit-scrollbar-thumb {
+  background: var(--pink-mid);
+  border-radius: 99px;
+}
+.katex-display::-webkit-scrollbar-thumb:hover {
+  background: var(--pink-deep);
+}
 @keyframes pop{ from{opacity:0; transform:translateY(4px) scale(.97);} to{opacity:1; transform:none;} }
 .msg-wrapper {
   display: flex;
