@@ -4,7 +4,7 @@ import { emit } from "@tauri-apps/api/event";
 import { invoke } from "@tauri-apps/api/core";
 import { load } from "@tauri-apps/plugin-store";
 import { saveApiKey, deleteApiKey, getProviders } from "../stronghold";
-import { Check, X, Eye, EyeOff, Trash2 } from "lucide-preact";
+import { Check, X, Eye, EyeOff, Trash2, ArrowLeft } from "lucide-preact";
 import ConfirmDialog from "../components/ConfirmDialog";
 import Loading from "../components/Loading.jsx";
 import { fetchAndCacheModels } from "../api/models.js";
@@ -92,29 +92,38 @@ function SaveableBirthday({ label, value, onSave, onDirtyChange }) {
     <div class="setting-item">
       <label>{label}</label>
       <div class="input-row">
-        <select value={current.month} onChange={(e) => handleChange("month", e)}>
-          <option value="">Month</option>
-          {months.map((m, i) => <option key={m} value={i + 1}>{m}</option>)}
-        </select>
-        <select value={current.day} onChange={(e) => handleChange("day", e)}>
-          <option value="">Day</option>
-          {days.map((d) => <option key={d} value={d}>{d}</option>)}
-        </select>
-        <select value={current.year} onChange={(e) => handleChange("year", e)}>
-          <option value="">Year</option>
-          {years.map((y) => <option key={y} value={y}>{y}</option>)}
-        </select>
-        {dirty && (
-          <div class="input-actions">
-            <button class="icon-btn tick-btn" onClick={() => { onSave(current); setDirty(false); }} title="Save">
-              <Check size={16} />
-            </button>
-            <button class="icon-btn cancel-btn" onClick={() => { setCurrent(value); setDirty(false); }} title="Cancel">
-              <X size={16} />
-            </button>
-          </div>
-        )}
+        <div style={{ flex: 1, display: 'flex', flexDirection: 'column', gap: '4px' }}>
+          <span style={{ fontSize: '11px', color: '#9a8a96', fontWeight: 600 }}>Month</span>
+          <select value={current.month} onChange={(e) => handleChange("month", e)}>
+            <option value="">-</option>
+            {months.map((m, i) => <option key={m} value={i + 1}>{m}</option>)}
+          </select>
+        </div>
+        <div style={{ flex: 1, display: 'flex', flexDirection: 'column', gap: '4px' }}>
+          <span style={{ fontSize: '11px', color: '#9a8a96', fontWeight: 600 }}>Day</span>
+          <select value={current.day} onChange={(e) => handleChange("day", e)}>
+            <option value="">-</option>
+            {days.map((d) => <option key={d} value={d}>{d}</option>)}
+          </select>
+        </div>
+        <div style={{ flex: 1, display: 'flex', flexDirection: 'column', gap: '4px' }}>
+          <span style={{ fontSize: '11px', color: '#9a8a96', fontWeight: 600 }}>Year</span>
+          <select value={current.year} onChange={(e) => handleChange("year", e)}>
+            <option value="">-</option>
+            {years.map((y) => <option key={y} value={y}>{y}</option>)}
+          </select>
+        </div>
       </div>
+      {dirty && (
+        <div class="input-actions" style={{ marginTop: '8px', justifyContent: 'flex-end' }}>
+          <button class="icon-btn tick-btn" onClick={() => { onSave(current); setDirty(false); }} title="Save">
+            <Check size={16} />
+          </button>
+          <button class="icon-btn cancel-btn" onClick={() => { setCurrent(value); setDirty(false); }} title="Cancel">
+            <X size={16} />
+          </button>
+        </div>
+      )}
     </div>
   );
 }
@@ -195,6 +204,7 @@ export default function SettingsPage({ onClose }) {
   const [temperature, setTemperature] = useState(1.0);
   const [maxTokens, setMaxTokens] = useState(2048);
   const [showTokenCount, setShowTokenCount] = useState(false);
+  const [mascotModeAction, setMascotModeAction] = useState("mascot");
   const [providerModels, setProviderModels] = useState([]);
   const [isLoadingModels, setIsLoadingModels] = useState(false);
   const [loadingText] = useState("Loading...");
@@ -219,27 +229,18 @@ export default function SettingsPage({ onClose }) {
   };
 
   const isMobile = /Android|webOS|iPhone|iPad|iPod/i.test(navigator.userAgent) || (window.__TAURI_INTERNALS__ && ["android", "ios"].includes(window.__TAURI_INTERNALS__.platform));
-  const isSettingsWindow = !isMobile && new URLSearchParams(window.location.search).get('page') === 'settings';
 
   const handleClose = () => {
     if (dirtyFields.size > 0) {
       setShowConfirmClose(true);
     } else {
-      if (!isSettingsWindow) {
-        if (onClose) onClose();
-      } else {
-        getCurrentWindow().hide();
-      }
+      if (onClose) onClose();
     }
   };
 
   const forceClose = () => {
     setShowConfirmClose(false);
-    if (!isSettingsWindow) {
-      if (onClose) onClose();
-    } else {
-      getCurrentWindow().hide();
-    }
+    if (onClose) onClose();
   };
 
   const showToast = (msg = "Saved!", err = false) => {
@@ -252,7 +253,7 @@ export default function SettingsPage({ onClose }) {
   useEffect(() => {
     const init = async () => {
       try {
-        let name = "Manager", bday = { day: "", month: "", year: "" }, provider = "openai", model = "gpt-4o", temp = 1.0, tokens = 2048, showTokens = false;
+        let name = "Manager", bday = { day: "", month: "", year: "" }, provider = "openai", model = "gpt-4o", temp = 1.0, tokens = 2048, showTokens = false, mascotMode = "mascot";
 
         if (isMobile) {
           name = localStorage.getItem("remie_config_userName") ?? name;
@@ -266,6 +267,7 @@ export default function SettingsPage({ onClose }) {
           if (tkStr) tokens = parseInt(tkStr, 10);
           const stStr = localStorage.getItem("remie_config_showTokenCount");
           if (stStr) showTokens = stStr === "true";
+          mascotMode = localStorage.getItem("remie_config_mascotModeAction") ?? mascotMode;
         } else {
           const s = await load("config.json", { autoSave: true });
           setStore(s);
@@ -276,6 +278,7 @@ export default function SettingsPage({ onClose }) {
           temp = await s.get("temperature") ?? temp;
           tokens = await s.get("maxTokens") ?? tokens;
           showTokens = await s.get("showTokenCount") ?? showTokens;
+          mascotMode = await s.get("mascotModeAction") ?? mascotMode;
         }
 
         setUserName(name);
@@ -285,6 +288,7 @@ export default function SettingsPage({ onClose }) {
         setTemperature(temp);
         setMaxTokens(tokens);
         setShowTokenCount(showTokens);
+        setMascotModeAction(mascotMode);
         
         // Fetch models for active provider
         const models = await fetchAndCacheModels(provider);
@@ -386,7 +390,14 @@ export default function SettingsPage({ onClose }) {
     const next = !showTokenCount;
     setShowTokenCount(next);
     await saveToStore("showTokenCount", next);
-    await emit("config:updated", { activeProvider, activeModel, temperature, maxTokens, showTokenCount: next });
+    await emit("config:updated", { showTokenCount: next });
+  };
+
+  const handleMascotModeChange = async (e) => {
+    const val = e.target.value;
+    setMascotModeAction(val);
+    await saveToStore("mascotModeAction", val);
+    await emit("config:updated", { mascotModeAction: val });
   };
 
   // ── Stronghold key actions ──
@@ -414,8 +425,8 @@ export default function SettingsPage({ onClose }) {
     <div id="settings-root">
       <div class="settings-header" data-tauri-drag-region>
         <div class="settings-title" data-tauri-drag-region>Settings</div>
-        <button class="icon-btn cancel-btn" onClick={handleClose} title="Close Settings">
-          <X size={18} />
+        <button class="icon-btn cancel-btn" onClick={handleClose} title="Back to Chat">
+          <ArrowLeft size={18} />
         </button>
       </div>
 
@@ -496,6 +507,18 @@ export default function SettingsPage({ onClose }) {
           />
 
           <div class="settings-section-title">Interface</div>
+          
+          <div class="setting-item">
+            <label>Mascot Mode Display</label>
+            <div class="input-row">
+              <select value={mascotModeAction} onChange={handleMascotModeChange}>
+                <option value="mascot">Show Floating Mascot</option>
+                <option value="taskbar">Minimize to Taskbar</option>
+              </select>
+            </div>
+            <div class="settings-hint">Choose what happens when you click the minimize icon.</div>
+          </div>
+
           <div class="setting-item" style={{ cursor: "pointer", userSelect: "none" }} onClick={handleToggleTokenCount}>
             <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center' }}>
               <label style={{ cursor: "pointer", margin: 0 }}>Show Token Count</label>

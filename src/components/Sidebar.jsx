@@ -7,7 +7,8 @@ export default function Sidebar({
   userName,
   renderMascots,
   openSettings,
-  closeSidebar
+  closeSidebar,
+  isOverlaySidebar
 }) {
   return (
     <div 
@@ -19,7 +20,7 @@ export default function Sidebar({
         }
       }}
     >
-      {isMobile && (
+      {isOverlaySidebar && (
         <div class="close-sidebar-btn" onClick={closeSidebar} title="Close Sidebar">
           <PanelLeftClose size={20} />
         </div>
@@ -27,14 +28,12 @@ export default function Sidebar({
 
       {renderMascots(true)}
       
-      {(isFullscreen || isMobile) && (
-        <div class="settings-bar" onClick={openSettings}>
-          <span class="user-name">{userName}</span>
-          <div class="settings-gear" title="Settings">
-            <Settings size={20} />
-          </div>
+      <div class="settings-bar" onClick={openSettings}>
+        <span class="user-name">{userName}</span>
+        <div class="settings-gear" title="Settings">
+          <Settings size={20} />
         </div>
-      )}
+      </div>
     </div>
   );
 }

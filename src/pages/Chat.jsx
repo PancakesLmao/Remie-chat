@@ -1,36 +1,14 @@
-import { useState, useEffect, useRef } from "preact/hooks";
+import { useState, useEffect, useRef, useMemo } from "preact/hooks";
 import { getCurrentWindow, LogicalSize, LogicalPosition } from "@tauri-apps/api/window";
 import { listen } from "@tauri-apps/api/event";
 import { invoke } from "@tauri-apps/api/core";
 import { load } from "@tauri-apps/plugin-store";
 import { getApiKey } from "../stronghold";
 import { streamLLM } from "../api/llmClient";
-import { Maximize2, Minimize2, Minus, AlertTriangle, Settings2, Info, PanelLeft } from "lucide-preact";
+import { Maximize2, Minimize2, Minus, Settings2, Info, PanelLeft, X } from "lucide-preact";
 import Sidebar from "../components/Sidebar.jsx";
-import { marked } from "marked";
-import DOMPurify from "dompurify";
+import MessageItem, { parseMessageChunks } from "../components/MessageItem.jsx";
 
-function escapeHtml(text) {
-  return text
-    .replace(/&/g, "&amp;")
-    .replace(/</g, "&lt;")
-    .replace(/>/g, "&gt;")
-    .replace(/"/g, "&quot;")
-    .replace(/'/g, "&#039;");
-}
-
-marked.use({
-  renderer: {
-    code(token) {
-      const code = token.text;
-      const lang = token.lang || '';
-      return `<div class="code-block-container">
-        <pre><code class="language-${lang}">${token.escaped ? token.text : escapeHtml(token.text)}</code></pre>
-        <button class="copy-btn" data-code="${encodeURIComponent(code)}" type="button">Copy</button>
-      </div>`;
-    }
-  }
-});
 
 // Assets
 import remieGen from "../assets/remie_gen.gif";
@@ -55,6 +33,7 @@ const THINKING_MODELS = new Set([
   "claude-opus-4-5", "claude-sonnet-4-5",
 ]);
 
+
 export default function ChatApp() {
   const [isMobile] = useState(() => (window.__TAURI_INTERNALS__ && ["android", "ios"].includes(window.__TAURI_INTERNALS__.platform)) || navigator.userAgent.includes("Android") || navigator.userAgent.includes("iPhone") || navigator.userAgent.includes("iPad"));
   const [mode, setMode] = useState("chatbox"); // 'chatbox' or 'widget'
@@ -66,16 +45,21 @@ export default function ChatApp() {
   const [activeProvider, setActiveProvider] = useState("openai");
   const [activeModel, setActiveModel] = useState("gpt-4o");
   const [isFullscreen, setIsFullscreen] = useState(false);
+  const [showSidebar, setShowSidebar] = useState(false);
   const [temperature, setTemperature] = useState(1.0);
   const [maxTokens, setMaxTokens] = useState(2048);
   const [thinkingEnabled, setThinkingEnabled] = useState(false);
   const [thinkingEffort, setThinkingEffort] = useState("medium");
   const [showTokenCount, setShowTokenCount] = useState(false);
+  const [mascotModeAction, setMascotModeAction] = useState("mascot");
   const [thinkingPopoverOpen, setThinkingPopoverOpen] = useState(false);
   const thinkingBtnRef = useRef(null);
   const thinkingTimeoutRef = useRef(null);
   const chatAreaRef = useRef(null);
   const streamingIdxRef = useRef(null); // index of the message being streamed
+  
+  const [editingMsgIdx, setEditingMsgIdx] = useState(null);
+  const [editInput, setEditInput] = useState("");
 
   // Load config from plugin-store on mount
   useEffect(() => {
@@ -88,7 +72,7 @@ export default function ChatApp() {
 
     const initStore = async () => {
       try {
-        let name = "Manager", bday = { day: "", month: "", year: "" }, provider = "openai", model = "gpt-4o", temp = 1.0, tokens = 2048, showTokens = false;
+        let name = "Manager", bday = { day: "", month: "", year: "" }, provider = "openai", model = "gpt-4o", temp = 1.0, tokens = 2048, showTokens = false, mascotMode = "mascot";
 
         if (isMobile) {
           name = localStorage.getItem("remie_config_userName") ?? name;
@@ -102,6 +86,7 @@ export default function ChatApp() {
           if (tkStr) tokens = parseInt(tkStr, 10);
           const stStr = localStorage.getItem("remie_config_showTokenCount");
           if (stStr) showTokens = stStr === "true";
+          mascotMode = localStorage.getItem("remie_config_mascotModeAction") ?? mascotMode;
         } else {
           const s = await load("config.json", { autoSave: false });
           name = await s.get("userName") ?? name;
@@ -111,6 +96,7 @@ export default function ChatApp() {
           temp = await s.get("temperature") ?? temp;
           tokens = await s.get("maxTokens") ?? tokens;
           showTokens = await s.get("showTokenCount") ?? showTokens;
+          mascotMode = await s.get("mascotModeAction") ?? mascotMode;
         }
 
         setUserName(name);
@@ -120,6 +106,7 @@ export default function ChatApp() {
         setTemperature(temp);
         setMaxTokens(tokens);
         setShowTokenCount(showTokens);
+        setMascotModeAction(mascotMode);
 
         const greeting = isBirthday(bday)
           ? `Happy Birthday, ${name}! It's Remie~ Wishing you a wonderful day today!`
@@ -148,7 +135,7 @@ export default function ChatApp() {
   useEffect(() => {
     let unlisten;
     listen("config:updated", (event) => {
-      const { activeProvider: p, activeModel: m, temperature: t, maxTokens: tk, showTokenCount: st } = event.payload;
+      const { activeProvider: p, activeModel: m, temperature: t, maxTokens: tk, showTokenCount: st, mascotModeAction: ma } = event.payload;
       if (p) setActiveProvider(p);
       if (m) {
         setActiveModel(m);
@@ -166,16 +153,26 @@ export default function ChatApp() {
       if (t !== undefined) setTemperature(t);
       if (tk !== undefined) setMaxTokens(tk);
       if (st !== undefined) setShowTokenCount(st);
+      if (ma !== undefined) setMascotModeAction(ma);
     }).then((fn) => { unlisten = fn; });
     return () => { if (unlisten) unlisten(); };
   }, []);
 
   // Auto scroll
+  const isUserScrollingRef = useRef(false);
+  
+  const handleScroll = (e) => {
+    const { scrollTop, scrollHeight, clientHeight } = e.target;
+    // Allow a small threshold (20px) to consider it "at bottom"
+    const isAtBottom = scrollHeight - scrollTop - clientHeight < 20;
+    isUserScrollingRef.current = !isAtBottom;
+  };
+
   useEffect(() => {
-    if (chatAreaRef.current) {
+    if (chatAreaRef.current && !isUserScrollingRef.current) {
       chatAreaRef.current.scrollTop = chatAreaRef.current.scrollHeight;
     }
-  }, [messages]);
+  }, [messages, isFullscreen]);
 
   // Event delegation for copy buttons
   useEffect(() => {
@@ -239,24 +236,56 @@ export default function ChatApp() {
     }
   };
 
+  const isInitialMount = useRef(true);
+
+  // Sync skipTaskbar with mascot mode setting
+  useEffect(() => {
+    if (isMobile) return;
+    try {
+      getCurrentWindow().setSkipTaskbar(mascotModeAction !== "taskbar");
+    } catch (err) {
+      console.error("Failed to set skipTaskbar", err);
+    }
+  }, [mascotModeAction, isMobile]);
+
   // Window resizing based on mode
   useEffect(() => {
+    if (isInitialMount.current) {
+      isInitialMount.current = false;
+      return;
+    }
     const resizeWindow = async () => {
       if (isMobile) return;
       try {
         const win = getCurrentWindow();
         await win.setAlwaysOnTop(true);
         if (mode === "widget") {
+          const size = await win.outerSize();
+          const scale = await win.scaleFactor();
+          const logical = size.toLogical(scale);
+          localStorage.setItem("remie_chatbox_width", logical.width);
+          localStorage.setItem("remie_chatbox_height", logical.height);
+
+          try { await win.setMinSize(null); } catch(e){}
+          try { await win.setResizable(false); } catch(e){}
+          try { await win.setAlwaysOnTop(true); } catch(e){}
           await resizeAnchored(win, 200, 200);
         } else {
-          await resizeAnchored(win, 360, 420);
+          let w = parseInt(localStorage.getItem("remie_chatbox_width")) || 360;
+          let h = parseInt(localStorage.getItem("remie_chatbox_height")) || 420;
+          w = Math.max(w, 280);
+          h = Math.max(h, 360);
+          try { await win.setMinSize(new LogicalSize(280, 360)); } catch(e){}
+          try { await win.setAlwaysOnTop(false); } catch(e){}
+          await resizeAnchored(win, w, h);
+          try { await win.setResizable(true); } catch(e){}
         }
       } catch (err) {
         console.error("Failed to resize window", err);
       }
     };
     resizeWindow();
-  }, [mode]);
+  }, [mode, isMobile]);
 
   // Window & Global keypress listener
   const typingTimeoutRef = useRef(null);
@@ -288,15 +317,31 @@ export default function ChatApp() {
     };
   }, []);
 
-  const renderMascots = (draggable) => (
-    <>
-      <img src={remieWaiting} class={aiState === "waiting_input" ? "active" : ""} {...(draggable ? {'data-tauri-drag-region': true} : {})} />
-      <img src={userTyping} class={aiState === "typing" ? "active" : ""} {...(draggable ? {'data-tauri-drag-region': true} : {})} />
-      <img src={remieThinking} class={aiState === "thinking" ? "active" : ""} {...(draggable ? {'data-tauri-drag-region': true} : {})} />
-      <img src={remieGen} class={aiState === "generating" ? "active" : ""} {...(draggable ? {'data-tauri-drag-region': true} : {})} />
-      <img src={remieComplete} class={aiState === "complete" ? "active" : ""} {...(draggable ? {'data-tauri-drag-region': true} : {})} />
-    </>
-  );
+  const derivedAiState = useMemo(() => {
+    if (aiState !== "generating") return aiState;
+    if (messages.length > 0) {
+      const lastMsg = messages[messages.length - 1];
+      if (lastMsg.role === "ai" && lastMsg.text) {
+        if (lastMsg.text.lastIndexOf("<think>") > lastMsg.text.lastIndexOf("</think>")) {
+          return "thinking";
+        }
+      }
+    }
+    return "generating";
+  }, [aiState, messages]);
+
+  const renderMascots = (draggable) => {
+    const state = derivedAiState;
+    return (
+      <>
+        <img src={remieWaiting} class={state === "waiting_input" ? "active" : ""} {...(draggable ? {'data-tauri-drag-region': true} : {})} />
+        <img src={userTyping} class={state === "typing" ? "active" : ""} {...(draggable ? {'data-tauri-drag-region': true} : {})} />
+        <img src={remieThinking} class={state === "thinking" ? "active" : ""} {...(draggable ? {'data-tauri-drag-region': true} : {})} />
+        <img src={remieGen} class={state === "generating" ? "active" : ""} {...(draggable ? {'data-tauri-drag-region': true} : {})} />
+        <img src={remieComplete} class={state === "complete" ? "active" : ""} {...(draggable ? {'data-tauri-drag-region': true} : {})} />
+      </>
+    );
+  };
 
   const handleInput = (e) => {
     setInput(e.target.value);
@@ -321,32 +366,22 @@ export default function ChatApp() {
     }
   };
 
-  const handleSubmit = async (e) => {
-    e.preventDefault();
+  const submitMessage = async (text, currentHistory) => {
     if (streamingIdxRef.current !== null) return;
     
-    const text = input.trim();
-    if (!text) return;
-
-    // Reset textarea height
-    const textarea = document.getElementById("chat-input");
-    if (textarea) {
-      textarea.style.height = "38px";
-    }
-
     // Build message history for context (map ai→assistant for API)
-    const history = messages.map((m) => ({
+    const history = currentHistory.map((m) => ({
       role: m.role === "ai" ? "assistant" : "user",
       content: m.text,
     }));
     history.push({ role: "user", content: text });
 
-    setMessages((prev) => [...prev, { role: "user", text }]);
-    setInput("");
+    const newMessages = [...currentHistory, { role: "user", text }];
+    setMessages(newMessages);
     setAiState("thinking");
 
     // Calculate index for the new AI message and set ref synchronously
-    const aiMsgIdx = messages.length + 1;
+    const aiMsgIdx = newMessages.length;
     streamingIdxRef.current = aiMsgIdx;
 
     // Add empty AI message bubble for streaming into
@@ -402,7 +437,8 @@ export default function ChatApp() {
       } else {
         // Desktop uses Rust streaming backend to utilize Stronghold vault and proxy
         const eventId = `chat-stream-${Date.now()}`;
-        const unlisten = await listen(eventId, (e) => {
+        let unlisten;
+        unlisten = await listen(eventId, (e) => {
           const rawMessage = e.payload;
           let message = rawMessage;
           if (typeof rawMessage === "string") {
@@ -429,7 +465,7 @@ export default function ChatApp() {
             });
             setAiState("complete");
             streamingIdxRef.current = null;
-            unlisten();
+            if (unlisten) unlisten();
             setTimeout(() => setAiState("waiting_input"), 1500);
           } else if (message.event === "Error") {
             console.error("[Chat] Error:", message.data);
@@ -442,7 +478,7 @@ export default function ChatApp() {
             });
             setAiState("waiting_input");
             streamingIdxRef.current = null;
-            unlisten();
+            if (unlisten) unlisten();
           }
         });
 
@@ -477,39 +513,94 @@ export default function ChatApp() {
     }
   };
 
+  const handleSubmit = async (e) => {
+    e.preventDefault();
+    if (streamingIdxRef.current !== null) return;
+    
+    const text = input.trim();
+    if (!text) return;
+
+    // Reset textarea height
+    const textarea = document.getElementById("chat-input");
+    if (textarea) {
+      textarea.style.height = "38px";
+    }
+
+    setInput("");
+    await submitMessage(text, messages);
+  };
+
+  const startEdit = (idx, text) => {
+    setEditingMsgIdx(idx);
+    setEditInput(text);
+  };
+
+  const handleEditSubmit = (idx) => {
+    if (!editInput.trim()) return;
+    const newText = editInput.trim();
+    setEditingMsgIdx(null);
+    const newHistory = messages.slice(0, idx);
+    submitMessage(newText, newHistory);
+  };
+
+  const handleRetry = (aiIdx) => {
+    if (aiIdx === 0 || streamingIdxRef.current !== null) return;
+    const userMsg = messages[aiIdx - 1];
+    if (!userMsg || userMsg.role !== 'user') return;
+    
+    const newHistory = messages.slice(0, aiIdx - 1);
+    submitMessage(userMsg.text, newHistory);
+  };
+
   const toggleFullscreen = async () => {
     const win = getCurrentWindow();
     const full = !isFullscreen;
     if (full) {
-      await resizeAnchored(win, 800, 720);
+      await win.maximize();
     } else {
-      await resizeAnchored(win, 360, 420);
+      try { await win.unmaximize(); } catch (e) {}
     }
     setIsFullscreen(full);
   };
 
-  const toIconMode = () => {
-    setIsFullscreen(false);
-    setMode("widget");
+  const toIconMode = async () => {
+    if (mascotModeAction === "taskbar") {
+      try {
+        await getCurrentWindow().minimize();
+      } catch (e) {
+        console.error(e);
+      }
+    } else {
+      setIsFullscreen(false);
+      setMode("widget");
+    }
+  };
+
+  const closeApp = async () => {
+    try {
+      await invoke("exit_app");
+    } catch (e) {
+      console.error(e);
+    }
   };
 
   const getStatusDotClass = () => {
-    if (aiState === 'waiting_input') return 'waiting';
-    return aiState;
+    const state = derivedAiState;
+    if (state === 'waiting_input') return 'waiting';
+    return state;
   };
 
-  const openSettings = async () => {
-    const isMobileDevice = /Android|webOS|iPhone|iPad|iPod/i.test(navigator.userAgent) || (window.__TAURI_INTERNALS__ && ["android", "ios"].includes(window.__TAURI_INTERNALS__.platform));
-    if (isMobileDevice) {
-      window.location.hash = "settings";
-    } else {
-      try {
-        await invoke('open_settings_window');
-      } catch (e) {
-        window.location.hash = "settings";
-      }
-    }
+  const openSettings = () => {
+    setShowSidebar(false);
+    window.location.hash = "settings";
   };
+
+  const isOverlaySidebar = isMobile || !isFullscreen;
+  const chatModeClass = [
+    isFullscreen ? 'full' : '',
+    isOverlaySidebar ? 'with-overlay-sidebar' : '',
+    showSidebar ? 'sidebar-open' : ''
+  ].filter(Boolean).join(' ');
 
   return (
     <div id="remie-root">
@@ -518,19 +609,19 @@ export default function ChatApp() {
           id="icon-mode"
           class={`state-${aiState}`}
           data-tauri-drag-region
-          onClick={() => setMode("chatbox")}
-          title="Click to open chat"
+          onDblClick={() => setMode("chatbox")}
+          title="Double click to open chat"
         >
           <div class="icon-ring" data-tauri-drag-region></div>
           {renderMascots(true)}
           <div class={`status-dot ${getStatusDotClass()}`} data-tauri-drag-region></div>
         </div>
       ) : (
-        <div id="chat-mode" class={isFullscreen ? 'full' : ''}>
+        <div id="chat-mode" class={chatModeClass}>
 
-          {/* Mobile backdrop for closing sidebar */}
-          {isFullscreen && isMobile && (
-            <div class="sidebar-backdrop" onClick={() => setIsFullscreen(false)}></div>
+          {/* Backdrop for closing overlay sidebar */}
+          {isOverlaySidebar && showSidebar && (
+            <div class="sidebar-backdrop" onClick={() => setShowSidebar(false)}></div>
           )}
 
           {/* Mascot side panel */}
@@ -540,23 +631,25 @@ export default function ChatApp() {
             userName={userName}
             renderMascots={renderMascots}
             openSettings={openSettings}
-            closeSidebar={() => setIsFullscreen(false)}
+            closeSidebar={() => setShowSidebar(false)}
+            isOverlaySidebar={isOverlaySidebar}
           />
 
           {/* Main chat panel */}
           <div class="chat-content-panel">
             <div
               id="chat-header"
-              data-tauri-drag-region
-              onPointerDown={(e) => {
+              onMouseDown={(e) => {
                 if (e.button === 0 && !e.target.closest('.header-btn')) {
-                  getCurrentWindow().startDragging();
+                  // Only drag if it's a single click
+                  if (e.detail > 1) return;
+                  getCurrentWindow().startDragging().catch(err => console.error("Drag error:", err));
                 }
               }}
             >
-              {/* Mobile Sidebar Button (Back button style) */}
-              {isMobile && (
-                <div class="header-btn" title="Show side panel" onClick={toggleFullscreen}>
+              {/* Sidebar Button */}
+              {isOverlaySidebar && (
+                <div class="header-btn" title="Show side panel" onClick={() => setShowSidebar(true)}>
                   <PanelLeft size={18} />
                 </div>
               )}
@@ -572,38 +665,62 @@ export default function ChatApp() {
                 </div>
               </div>
 
-              {/* Desktop Expand Button */}
-              {!isMobile && (
-                <div class="header-btn" title={isFullscreen ? "Collapse" : "Expand"} onClick={toggleFullscreen}>
-                  {isFullscreen ? <Minimize2 size={16} /> : <Maximize2 size={16} />}
-                </div>
-              )}
-
-              {/* Icon mode button - Desktop only */}
+              {/* Icon mode button - Desktop only (Minimize) */}
               {!isMobile && (
                 <div class="header-btn" title="Icon mode" onClick={toIconMode}>
                   <Minus size={16} />
                 </div>
               )}
+
+              {/* Desktop Expand Button (Maximize) */}
+              {!isMobile && (
+                <div class="header-btn" title={isFullscreen ? "Restore" : "Maximize"} onClick={toggleFullscreen}>
+                  {isFullscreen ? <Minimize2 size={16} /> : <Maximize2 size={16} />}
+                </div>
+              )}
+
+              {/* Close app button */}
+              {!isMobile && (
+                <div class="header-btn close-btn" title="Close" onClick={closeApp}>
+                  <X size={16} />
+                </div>
+              )}
             </div>
 
-            <div id="chat-body" ref={chatAreaRef}>
+            <div id="chat-body" ref={chatAreaRef} onScroll={handleScroll}>
               {messages.map((msg, idx) => {
                 if (!msg.text && !msg.isError) return null;
-                const html = DOMPurify.sanitize(marked.parse(msg.text || ""));
+                const isLastMsg = idx === messages.length - 1;
+                const isGenerating = aiState === "generating" || aiState === "thinking";
+                const isStreaming = isLastMsg && isGenerating;
+
                 return (
-                  <div key={idx} class="msg-wrapper">
-                    <div class={`msg ${msg.role}${msg.isError ? ' error' : ''}`}>
-                      {msg.isError && <AlertTriangle size={14} style={{ flexShrink: 0, marginTop: '1px' }} />}
-                      <div class="markdown-body" dangerouslySetInnerHTML={{ __html: html }} />
-                    </div>
-                    {msg.role === "ai" && showTokenCount && msg.tokens > 0 && (
-                      <div class="token-count">Tokens used: {msg.tokens}</div>
-                    )}
-                  </div>
+                  <MessageItem
+                    key={idx}
+                    msg={msg}
+                    idx={idx}
+                    isStreaming={isStreaming}
+                    showTokenCount={showTokenCount}
+                    isEditing={editingMsgIdx === idx}
+                    editInput={editInput}
+                    onEditInput={(e) => setEditInput(e.target.value)}
+                    onEditCancel={() => setEditingMsgIdx(null)}
+                    onEditSubmit={handleEditSubmit}
+                    onStartEdit={startEdit}
+                    onRetry={handleRetry}
+                    disableRetry={streamingIdxRef.current !== null}
+                  />
                 );
               })}
-              {(aiState === 'thinking' || aiState === 'generating') && (
+              {(aiState === 'thinking' || aiState === 'generating') && (() => {
+                const lastMsg = messages[messages.length - 1];
+                if (lastMsg && lastMsg.role === 'ai') {
+                  const chunks = parseMessageChunks(lastMsg.text || "");
+                  const hasText = chunks.some(c => c.type === 'text');
+                  return !hasText;
+                }
+                return true;
+              })() && (
                 <div class="msg ai typing-msg">
                   <span></span><span></span><span></span>
                 </div>

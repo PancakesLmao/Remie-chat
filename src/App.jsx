@@ -5,13 +5,13 @@ import ChatApp from "./pages/Chat.jsx";
 import Loading from "./components/Loading.jsx";
 import { fetchAndCacheModels } from "./api/models.js";
 import { load as storeLoad } from '@tauri-apps/plugin-store';
+import { listen } from '@tauri-apps/api/event';
 
 // Detect which page this window should render on desktop
 const isMobile = /Android|webOS|iPhone|iPad|iPod/i.test(navigator.userAgent) || (window.__TAURI_INTERNALS__ && ["android", "ios"].includes(window.__TAURI_INTERNALS__.platform));
-const isSettingsWindow = !isMobile && new URLSearchParams(window.location.search).get('page') === 'settings';
 
 function App() {
-  const [page, setPage] = useState(isSettingsWindow ? 'settings' : (window.location.hash === '#settings' ? 'settings' : 'chat'));
+  const [page, setPage] = useState(window.location.hash === '#settings' ? 'settings' : 'chat');
   const [appReady, setAppReady] = useState(false);
   const [loadingText, setLoadingText] = useState("Loading...");
 
@@ -20,12 +20,20 @@ function App() {
       document.body.classList.add("mobile-device");
     }
     const handleHashChange = () => {
-      if (!isSettingsWindow) {
-        setPage(window.location.hash === '#settings' ? 'settings' : 'chat');
-      }
+      setPage(window.location.hash === '#settings' ? 'settings' : 'chat');
     };
     window.addEventListener('hashchange', handleHashChange);
-    return () => window.removeEventListener('hashchange', handleHashChange);
+    
+    // Listen for tray menu settings click
+    let unlisten;
+    listen('open-settings', () => {
+      window.location.hash = 'settings';
+    }).then(f => { unlisten = f; });
+
+    return () => {
+      window.removeEventListener('hashchange', handleHashChange);
+      if (unlisten) unlisten();
+    };
   }, []);
 
   useEffect(() => {
