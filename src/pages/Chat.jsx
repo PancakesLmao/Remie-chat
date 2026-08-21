@@ -9,7 +9,7 @@ import { Maximize2, Minimize2, Minus, AlertTriangle, Settings2, Info, PanelLeft,
 import Sidebar from "../components/Sidebar.jsx";
 import { marked } from "marked";
 import DOMPurify from "dompurify";
-import markedKatex from "marked-katex-extension";
+import renderMathInElement from "katex/contrib/auto-render";
 import "katex/dist/katex.min.css";
 
 function escapeHtml(text) {
@@ -41,63 +41,72 @@ function parseMessageChunks(text) {
   return chunks.filter(c => c.type === 'think' || c.content.trim() !== '');
 }
 
-function preprocessMarkdown(text) {
-  let processed = text;
-  
-  const codeMatches = processed.match(/```/g) || [];
-  const isCodeOpen = codeMatches.length % 2 !== 0;
-  if (isCodeOpen) {
-    return processed + '\n```';
-  }
-
-  const mathMatches = processed.match(/\$\$/g) || [];
-  let isMathOpen = mathMatches.length % 2 !== 0;
-
-  const lastBracketOpen = processed.lastIndexOf('\\[');
-  const lastBracketClose = processed.lastIndexOf('\\]');
-  let isBracketOpen = lastBracketOpen > lastBracketClose;
-
-  const lastParenOpen = processed.lastIndexOf('\\(');
-  const lastParenClose = processed.lastIndexOf('\\)');
-  let isParenOpen = lastParenOpen > lastParenClose;
-
-  if (isMathOpen) {
-    processed += '$$';
-  } else if (isBracketOpen) {
-    processed += '\\]';
-  } else if (isParenOpen) {
-    processed += '\\)';
-  }
-
-  // Ensure $$ blocks are on their own lines for marked-katex to parse them properly as blocks
-  processed = processed.replace(/(?<!\$)\$\$(?!\$)/g, '\n$$$$\n');
-  processed = processed.replace(/\n{3,}/g, '\n\n');
-
-  processed = processed.replace(/\\\[([\s\S]*?)\\\]/g, "$$$$$1$$$$");
-  processed = processed.replace(/\\\(([\s\S]*?)\\\)/g, "$$$1$$");
-
-  processed = processed.replace(/\$\$([\s\S]*?)\$\$/g, (match, inner) => {
-    let open = 0;
-    for (let i = 0; i < inner.length; i++) {
-      if (inner[i] === '\\') { i++; continue; }
-      if (inner[i] === '{') open++;
-      if (inner[i] === '}') open = Math.max(0, open - 1);
-    }
-    return '$$' + inner + '}'.repeat(open) + '$$';
-  });
-
-  processed = processed.replace(/(?<!\$)\$(?!\$)([\s\S]*?)(?<!\$)\$(?!\$)/g, (match, inner) => {
-    let open = 0;
-    for (let i = 0; i < inner.length; i++) {
-      if (inner[i] === '\\') { i++; continue; }
-      if (inner[i] === '{') open++;
-      if (inner[i] === '}') open = Math.max(0, open - 1);
-    }
-    return '$' + inner + '}'.repeat(open) + '$';
-  });
-
-  return processed;
+function closeOpenDelimiters(text) {
+  const ddMatches = text.match(/\$\$/g) || [];
+  if (ddMatches.length % 2 !== 0) text += '$$';
+  if (text.lastIndexOf('\\[') > text.lastIndexOf('\\]')) text += '\\]';
+  if (text.lastIndexOf('\\(') > text.lastIndexOf('\\)')) text += '\\)';
+  return text;
 }
+
+function parseWithKatex(rawText) {
+  // 1. Close streaming-open delimiters
+  let text = rawText;
+  const codeMatches = text.match(/```/g) || [];
+  if (codeMatches.length % 2 !== 0) {
+    text += '\n```';
+  } else {
+    text = closeOpenDelimiters(text);
+  }
+
+  // 2. Protect math blocks from marked processing
+  //    marked eats \[ → [, turns _ into <em>, * into <strong>, etc.
+  const mathStore = [];
+  const PLACEHOLDER_RE = /MATHPLACEHOLDER(\d+)END/g;
+
+  function storeMath(src) {
+    const key = `MATHPLACEHOLDER${mathStore.length}END`;
+    mathStore.push(src);
+    return key;
+  }
+
+  const mathCharRe = /[\\^_{}=+\-/<>|∑∫α-ωΑ-Ω]|\d/;
+
+  let safeText = text;
+  // Order matters: $$ before $ to avoid splitting display math
+  safeText = safeText.replace(/\$\$([\s\S]*?)\$\$/g, (m) => storeMath(m));
+  safeText = safeText.replace(/\\\[([\s\S]*?)\\\]/g, (m) => storeMath(m));
+  safeText = safeText.replace(/\\\(([^\n]*?)\\\)/g, (m) => storeMath(m));
+  safeText = safeText.replace(/(?<!\$)\$(?!\$)([^\n$]{1,500}?)(?<!\$)\$(?!\$)/g, (m, inner) => {
+    if (!mathCharRe.test(inner)) return m;
+    return storeMath(m);
+  });
+
+  // 3. Marked processes clean markdown (no math chars to mangle)
+  let html = marked.parse(safeText);
+
+  // 4. Restore math originals
+  html = html.replace(PLACEHOLDER_RE, (_, i) => mathStore[parseInt(i)]);
+
+  // 5. katex auto-render per official API (katex.org/docs/autorender)
+  const div = document.createElement('div');
+  div.innerHTML = html;
+  try {
+    renderMathInElement(div, {
+      delimiters: [
+        { left: '$$', right: '$$', display: true },
+        { left: '\\[', right: '\\]', display: true },
+        { left: '\\(', right: '\\)', display: false },
+        { left: '$', right: '$', display: false },
+      ],
+      ignoredTags: ['script', 'noscript', 'style', 'textarea', 'pre', 'code', 'option'],
+      throwOnError: false,
+      errorCallback: () => {},
+    });
+  } catch (e) {}
+  return div.innerHTML;
+}
+
 
 marked.use({
   renderer: {
@@ -112,7 +121,6 @@ marked.use({
   }
 });
 
-marked.use(markedKatex({ throwOnError: false, displayMode: true }));
 
 // Assets
 import remieGen from "../assets/remie_gen.gif";
@@ -284,8 +292,17 @@ export default function ChatApp() {
   }, []);
 
   // Auto scroll
+  const isUserScrollingRef = useRef(false);
+  
+  const handleScroll = (e) => {
+    const { scrollTop, scrollHeight, clientHeight } = e.target;
+    // Allow a small threshold (20px) to consider it "at bottom"
+    const isAtBottom = scrollHeight - scrollTop - clientHeight < 20;
+    isUserScrollingRef.current = !isAtBottom;
+  };
+
   useEffect(() => {
-    if (chatAreaRef.current) {
+    if (chatAreaRef.current && !isUserScrollingRef.current) {
       chatAreaRef.current.scrollTop = chatAreaRef.current.scrollHeight;
     }
   }, [messages, isFullscreen]);
@@ -807,7 +824,7 @@ export default function ChatApp() {
               )}
             </div>
 
-            <div id="chat-body" ref={chatAreaRef}>
+            <div id="chat-body" ref={chatAreaRef} onScroll={handleScroll}>
               {messages.map((msg, idx) => {
                 if (!msg.text && !msg.isError) return null;
                 const chunks = parseMessageChunks(msg.text || "");
@@ -851,7 +868,7 @@ export default function ChatApp() {
                                   </div>
                                 );
                               } else {
-                                const html = DOMPurify.sanitize(marked.parse(preprocessMarkdown(chunk.content)), {
+                                const html = DOMPurify.sanitize(parseWithKatex(chunk.content), {
                                   ADD_TAGS: ['math', 'annotation', 'semantics', 'mrow', 'mi', 'mn', 'mo', 'ms', 'mspace', 'mtext', 'menclose', 'merror', 'mfenced', 'mfrac', 'mpadded', 'mphantom', 'mroot', 'msqrt', 'mstyle', 'mmultiscripts', 'mover', 'mprescripts', 'msub', 'msubsup', 'msup', 'munder', 'munderover', 'none', 'annotation-xml'],
                                   ADD_ATTR: ['target', 'class', 'style']
                                 });
@@ -863,8 +880,7 @@ export default function ChatApp() {
                                 );
                               }
                             } else {
-                              const textToParse = preprocessMarkdown(chunk.content);
-                              const html = DOMPurify.sanitize(marked.parse(textToParse), {
+                              const html = DOMPurify.sanitize(parseWithKatex(chunk.content), {
                                 ADD_TAGS: ['math', 'annotation', 'semantics', 'mrow', 'mi', 'mn', 'mo', 'ms', 'mspace', 'mtext', 'menclose', 'merror', 'mfenced', 'mfrac', 'mpadded', 'mphantom', 'mroot', 'msqrt', 'mstyle', 'mmultiscripts', 'mover', 'mprescripts', 'msub', 'msubsup', 'msup', 'munder', 'munderover', 'none', 'annotation-xml'],
                                 ADD_ATTR: ['target', 'class', 'style']
                               });
@@ -899,7 +915,15 @@ export default function ChatApp() {
                   </div>
                 );
               })}
-              {(aiState === 'thinking' || aiState === 'generating') && (
+              {(aiState === 'thinking' || aiState === 'generating') && (() => {
+                const lastMsg = messages[messages.length - 1];
+                if (lastMsg && lastMsg.role === 'ai') {
+                  const chunks = parseMessageChunks(lastMsg.text || "");
+                  const hasText = chunks.some(c => c.type === 'text');
+                  return !hasText;
+                }
+                return true;
+              })() && (
                 <div class="msg ai typing-msg">
                   <span></span><span></span><span></span>
                 </div>

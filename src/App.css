@@ -468,15 +468,23 @@ body.mobile-device #chat-mode.full {
   align-self:flex-start;
   background:var(--pink-pale);
   border-bottom-left-radius:4px;
+  min-width: 0;
+  overflow-x: hidden;
+}
+.msg.ai .markdown-body {
+  overflow-x: auto;
+  max-width: 100%;
 }
 
 /* Gracefully handle KaTeX syntax errors so they aren't scary red text */
-.katex-error {
-  color: inherit !important;
-  background-color: rgba(139, 122, 134, 0.15);
+.katex-error,
+.katex-error * {
+  color: #8b7a86 !important;
+  background-color: rgba(139, 122, 134, 0.1);
   border-radius: 4px;
-  padding: 0 4px;
-  text-decoration: underline dotted rgba(139, 122, 134, 0.5);
+  padding: 0 2px;
+  text-decoration: none !important;
+  border: none !important;
 }
 
 /* Think blocks */
