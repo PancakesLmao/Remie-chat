@@ -204,6 +204,7 @@ export default function SettingsPage({ onClose }) {
   const [temperature, setTemperature] = useState(1.0);
   const [maxTokens, setMaxTokens] = useState(2048);
   const [showTokenCount, setShowTokenCount] = useState(false);
+  const [mascotModeAction, setMascotModeAction] = useState("mascot");
   const [providerModels, setProviderModels] = useState([]);
   const [isLoadingModels, setIsLoadingModels] = useState(false);
   const [loadingText] = useState("Loading...");
@@ -252,7 +253,7 @@ export default function SettingsPage({ onClose }) {
   useEffect(() => {
     const init = async () => {
       try {
-        let name = "Manager", bday = { day: "", month: "", year: "" }, provider = "openai", model = "gpt-4o", temp = 1.0, tokens = 2048, showTokens = false;
+        let name = "Manager", bday = { day: "", month: "", year: "" }, provider = "openai", model = "gpt-4o", temp = 1.0, tokens = 2048, showTokens = false, mascotMode = "mascot";
 
         if (isMobile) {
           name = localStorage.getItem("remie_config_userName") ?? name;
@@ -266,6 +267,7 @@ export default function SettingsPage({ onClose }) {
           if (tkStr) tokens = parseInt(tkStr, 10);
           const stStr = localStorage.getItem("remie_config_showTokenCount");
           if (stStr) showTokens = stStr === "true";
+          mascotMode = localStorage.getItem("remie_config_mascotModeAction") ?? mascotMode;
         } else {
           const s = await load("config.json", { autoSave: true });
           setStore(s);
@@ -276,6 +278,7 @@ export default function SettingsPage({ onClose }) {
           temp = await s.get("temperature") ?? temp;
           tokens = await s.get("maxTokens") ?? tokens;
           showTokens = await s.get("showTokenCount") ?? showTokens;
+          mascotMode = await s.get("mascotModeAction") ?? mascotMode;
         }
 
         setUserName(name);
@@ -285,6 +288,7 @@ export default function SettingsPage({ onClose }) {
         setTemperature(temp);
         setMaxTokens(tokens);
         setShowTokenCount(showTokens);
+        setMascotModeAction(mascotMode);
         
         // Fetch models for active provider
         const models = await fetchAndCacheModels(provider);
@@ -386,7 +390,14 @@ export default function SettingsPage({ onClose }) {
     const next = !showTokenCount;
     setShowTokenCount(next);
     await saveToStore("showTokenCount", next);
-    await emit("config:updated", { activeProvider, activeModel, temperature, maxTokens, showTokenCount: next });
+    await emit("config:updated", { showTokenCount: next });
+  };
+
+  const handleMascotModeChange = async (e) => {
+    const val = e.target.value;
+    setMascotModeAction(val);
+    await saveToStore("mascotModeAction", val);
+    await emit("config:updated", { mascotModeAction: val });
   };
 
   // ── Stronghold key actions ──
@@ -496,6 +507,18 @@ export default function SettingsPage({ onClose }) {
           />
 
           <div class="settings-section-title">Interface</div>
+          
+          <div class="setting-item">
+            <label>Mascot Mode Display</label>
+            <div class="input-row">
+              <select value={mascotModeAction} onChange={handleMascotModeChange}>
+                <option value="mascot">Show Floating Mascot</option>
+                <option value="taskbar">Minimize to Taskbar</option>
+              </select>
+            </div>
+            <div class="settings-hint">Choose what happens when you click the minimize icon.</div>
+          </div>
+
           <div class="setting-item" style={{ cursor: "pointer", userSelect: "none" }} onClick={handleToggleTokenCount}>
             <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center' }}>
               <label style={{ cursor: "pointer", margin: 0 }}>Show Token Count</label>

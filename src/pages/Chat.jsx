@@ -5,7 +5,7 @@ import { invoke } from "@tauri-apps/api/core";
 import { load } from "@tauri-apps/plugin-store";
 import { getApiKey } from "../stronghold";
 import { streamLLM } from "../api/llmClient";
-import { Maximize2, Minimize2, Minus, AlertTriangle, Settings2, Info, PanelLeft, X } from "lucide-preact";
+import { Maximize2, Minimize2, Minus, AlertTriangle, Settings2, Info, PanelLeft, X, Copy, Pencil, Loader2, RefreshCw } from "lucide-preact";
 import Sidebar from "../components/Sidebar.jsx";
 import { marked } from "marked";
 import DOMPurify from "dompurify";
@@ -19,6 +19,84 @@ function escapeHtml(text) {
     .replace(/>/g, "&gt;")
     .replace(/"/g, "&quot;")
     .replace(/'/g, "&#039;");
+}
+
+function parseMessageChunks(text) {
+  const chunks = [];
+  const regex = /<think>([\s\S]*?)(<\/think>|$)/g;
+  let lastIndex = 0;
+  let match;
+  while ((match = regex.exec(text)) !== null) {
+    if (match.index > lastIndex) {
+      chunks.push({ type: 'text', content: text.substring(lastIndex, match.index) });
+    }
+    const isClosed = match[2] === '</think>';
+    chunks.push({ type: 'think', content: match[1], isClosed });
+    lastIndex = regex.lastIndex;
+  }
+  if (lastIndex < text.length) {
+    chunks.push({ type: 'text', content: text.substring(lastIndex) });
+  }
+  // Filter out empty text chunks
+  return chunks.filter(c => c.type === 'think' || c.content.trim() !== '');
+}
+
+function preprocessMarkdown(text) {
+  let processed = text;
+  
+  const codeMatches = processed.match(/```/g) || [];
+  const isCodeOpen = codeMatches.length % 2 !== 0;
+  if (isCodeOpen) {
+    return processed + '\n```';
+  }
+
+  const mathMatches = processed.match(/\$\$/g) || [];
+  let isMathOpen = mathMatches.length % 2 !== 0;
+
+  const lastBracketOpen = processed.lastIndexOf('\\[');
+  const lastBracketClose = processed.lastIndexOf('\\]');
+  let isBracketOpen = lastBracketOpen > lastBracketClose;
+
+  const lastParenOpen = processed.lastIndexOf('\\(');
+  const lastParenClose = processed.lastIndexOf('\\)');
+  let isParenOpen = lastParenOpen > lastParenClose;
+
+  if (isMathOpen) {
+    processed += '$$';
+  } else if (isBracketOpen) {
+    processed += '\\]';
+  } else if (isParenOpen) {
+    processed += '\\)';
+  }
+
+  // Ensure $$ blocks are on their own lines for marked-katex to parse them properly as blocks
+  processed = processed.replace(/(?<!\$)\$\$(?!\$)/g, '\n$$$$\n');
+  processed = processed.replace(/\n{3,}/g, '\n\n');
+
+  processed = processed.replace(/\\\[([\s\S]*?)\\\]/g, "$$$$$1$$$$");
+  processed = processed.replace(/\\\(([\s\S]*?)\\\)/g, "$$$1$$");
+
+  processed = processed.replace(/\$\$([\s\S]*?)\$\$/g, (match, inner) => {
+    let open = 0;
+    for (let i = 0; i < inner.length; i++) {
+      if (inner[i] === '\\') { i++; continue; }
+      if (inner[i] === '{') open++;
+      if (inner[i] === '}') open = Math.max(0, open - 1);
+    }
+    return '$$' + inner + '}'.repeat(open) + '$$';
+  });
+
+  processed = processed.replace(/(?<!\$)\$(?!\$)([\s\S]*?)(?<!\$)\$(?!\$)/g, (match, inner) => {
+    let open = 0;
+    for (let i = 0; i < inner.length; i++) {
+      if (inner[i] === '\\') { i++; continue; }
+      if (inner[i] === '{') open++;
+      if (inner[i] === '}') open = Math.max(0, open - 1);
+    }
+    return '$' + inner + '}'.repeat(open) + '$';
+  });
+
+  return processed;
 }
 
 marked.use({
@@ -59,6 +137,28 @@ const THINKING_MODELS = new Set([
   "claude-opus-4-5", "claude-sonnet-4-5",
 ]);
 
+const CopyMessageButton = ({ text }) => {
+  const [copied, setCopied] = useState(false);
+  const handleCopy = async (e) => {
+    if (e) {
+      e.stopPropagation();
+      e.preventDefault();
+    }
+    try {
+      await navigator.clipboard.writeText(text);
+      setCopied(true);
+      setTimeout(() => setCopied(false), 2000);
+    } catch (err) {
+      console.error(err);
+    }
+  };
+  return (
+    <button type="button" class="action-btn" title="Copy text" onClick={handleCopy}>
+      {copied ? <span style={{ fontSize: '11px', color: '#8fd6a8', fontWeight: 'bold' }}>Copied!</span> : <Copy size={13} />}
+    </button>
+  );
+};
+
 export default function ChatApp() {
   const [isMobile] = useState(() => (window.__TAURI_INTERNALS__ && ["android", "ios"].includes(window.__TAURI_INTERNALS__.platform)) || navigator.userAgent.includes("Android") || navigator.userAgent.includes("iPhone") || navigator.userAgent.includes("iPad"));
   const [mode, setMode] = useState("chatbox"); // 'chatbox' or 'widget'
@@ -76,11 +176,15 @@ export default function ChatApp() {
   const [thinkingEnabled, setThinkingEnabled] = useState(false);
   const [thinkingEffort, setThinkingEffort] = useState("medium");
   const [showTokenCount, setShowTokenCount] = useState(false);
+  const [mascotModeAction, setMascotModeAction] = useState("mascot");
   const [thinkingPopoverOpen, setThinkingPopoverOpen] = useState(false);
   const thinkingBtnRef = useRef(null);
   const thinkingTimeoutRef = useRef(null);
   const chatAreaRef = useRef(null);
   const streamingIdxRef = useRef(null); // index of the message being streamed
+  
+  const [editingMsgIdx, setEditingMsgIdx] = useState(null);
+  const [editInput, setEditInput] = useState("");
 
   // Load config from plugin-store on mount
   useEffect(() => {
@@ -93,7 +197,7 @@ export default function ChatApp() {
 
     const initStore = async () => {
       try {
-        let name = "Manager", bday = { day: "", month: "", year: "" }, provider = "openai", model = "gpt-4o", temp = 1.0, tokens = 2048, showTokens = false;
+        let name = "Manager", bday = { day: "", month: "", year: "" }, provider = "openai", model = "gpt-4o", temp = 1.0, tokens = 2048, showTokens = false, mascotMode = "mascot";
 
         if (isMobile) {
           name = localStorage.getItem("remie_config_userName") ?? name;
@@ -107,6 +211,7 @@ export default function ChatApp() {
           if (tkStr) tokens = parseInt(tkStr, 10);
           const stStr = localStorage.getItem("remie_config_showTokenCount");
           if (stStr) showTokens = stStr === "true";
+          mascotMode = localStorage.getItem("remie_config_mascotModeAction") ?? mascotMode;
         } else {
           const s = await load("config.json", { autoSave: false });
           name = await s.get("userName") ?? name;
@@ -116,6 +221,7 @@ export default function ChatApp() {
           temp = await s.get("temperature") ?? temp;
           tokens = await s.get("maxTokens") ?? tokens;
           showTokens = await s.get("showTokenCount") ?? showTokens;
+          mascotMode = await s.get("mascotModeAction") ?? mascotMode;
         }
 
         setUserName(name);
@@ -125,6 +231,7 @@ export default function ChatApp() {
         setTemperature(temp);
         setMaxTokens(tokens);
         setShowTokenCount(showTokens);
+        setMascotModeAction(mascotMode);
 
         const greeting = isBirthday(bday)
           ? `Happy Birthday, ${name}! It's Remie~ Wishing you a wonderful day today!`
@@ -153,7 +260,7 @@ export default function ChatApp() {
   useEffect(() => {
     let unlisten;
     listen("config:updated", (event) => {
-      const { activeProvider: p, activeModel: m, temperature: t, maxTokens: tk, showTokenCount: st } = event.payload;
+      const { activeProvider: p, activeModel: m, temperature: t, maxTokens: tk, showTokenCount: st, mascotModeAction: ma } = event.payload;
       if (p) setActiveProvider(p);
       if (m) {
         setActiveModel(m);
@@ -171,6 +278,7 @@ export default function ChatApp() {
       if (t !== undefined) setTemperature(t);
       if (tk !== undefined) setMaxTokens(tk);
       if (st !== undefined) setShowTokenCount(st);
+      if (ma !== undefined) setMascotModeAction(ma);
     }).then((fn) => { unlisten = fn; });
     return () => { if (unlisten) unlisten(); };
   }, []);
@@ -246,6 +354,16 @@ export default function ChatApp() {
 
   const isInitialMount = useRef(true);
 
+  // Sync skipTaskbar with mascot mode setting
+  useEffect(() => {
+    if (isMobile) return;
+    try {
+      getCurrentWindow().setSkipTaskbar(mascotModeAction !== "taskbar");
+    } catch (err) {
+      console.error("Failed to set skipTaskbar", err);
+    }
+  }, [mascotModeAction, isMobile]);
+
   // Window resizing based on mode
   useEffect(() => {
     if (isInitialMount.current) {
@@ -313,15 +431,18 @@ export default function ChatApp() {
     };
   }, []);
 
-  const renderMascots = (draggable) => (
-    <>
-      <img src={remieWaiting} class={aiState === "waiting_input" ? "active" : ""} {...(draggable ? {'data-tauri-drag-region': true} : {})} />
-      <img src={userTyping} class={aiState === "typing" ? "active" : ""} {...(draggable ? {'data-tauri-drag-region': true} : {})} />
-      <img src={remieThinking} class={aiState === "thinking" ? "active" : ""} {...(draggable ? {'data-tauri-drag-region': true} : {})} />
-      <img src={remieGen} class={aiState === "generating" ? "active" : ""} {...(draggable ? {'data-tauri-drag-region': true} : {})} />
-      <img src={remieComplete} class={aiState === "complete" ? "active" : ""} {...(draggable ? {'data-tauri-drag-region': true} : {})} />
-    </>
-  );
+  const renderMascots = (draggable) => {
+    const state = getDerivedAiState();
+    return (
+      <>
+        <img src={remieWaiting} class={state === "waiting_input" ? "active" : ""} {...(draggable ? {'data-tauri-drag-region': true} : {})} />
+        <img src={userTyping} class={state === "typing" ? "active" : ""} {...(draggable ? {'data-tauri-drag-region': true} : {})} />
+        <img src={remieThinking} class={state === "thinking" ? "active" : ""} {...(draggable ? {'data-tauri-drag-region': true} : {})} />
+        <img src={remieGen} class={state === "generating" ? "active" : ""} {...(draggable ? {'data-tauri-drag-region': true} : {})} />
+        <img src={remieComplete} class={state === "complete" ? "active" : ""} {...(draggable ? {'data-tauri-drag-region': true} : {})} />
+      </>
+    );
+  };
 
   const handleInput = (e) => {
     setInput(e.target.value);
@@ -346,32 +467,22 @@ export default function ChatApp() {
     }
   };
 
-  const handleSubmit = async (e) => {
-    e.preventDefault();
+  const submitMessage = async (text, currentHistory) => {
     if (streamingIdxRef.current !== null) return;
     
-    const text = input.trim();
-    if (!text) return;
-
-    // Reset textarea height
-    const textarea = document.getElementById("chat-input");
-    if (textarea) {
-      textarea.style.height = "38px";
-    }
-
     // Build message history for context (map ai→assistant for API)
-    const history = messages.map((m) => ({
+    const history = currentHistory.map((m) => ({
       role: m.role === "ai" ? "assistant" : "user",
       content: m.text,
     }));
     history.push({ role: "user", content: text });
 
-    setMessages((prev) => [...prev, { role: "user", text }]);
-    setInput("");
+    const newMessages = [...currentHistory, { role: "user", text }];
+    setMessages(newMessages);
     setAiState("thinking");
 
     // Calculate index for the new AI message and set ref synchronously
-    const aiMsgIdx = messages.length + 1;
+    const aiMsgIdx = newMessages.length;
     streamingIdxRef.current = aiMsgIdx;
 
     // Add empty AI message bubble for streaming into
@@ -427,7 +538,8 @@ export default function ChatApp() {
       } else {
         // Desktop uses Rust streaming backend to utilize Stronghold vault and proxy
         const eventId = `chat-stream-${Date.now()}`;
-        const unlisten = await listen(eventId, (e) => {
+        let unlisten;
+        unlisten = await listen(eventId, (e) => {
           const rawMessage = e.payload;
           let message = rawMessage;
           if (typeof rawMessage === "string") {
@@ -454,7 +566,7 @@ export default function ChatApp() {
             });
             setAiState("complete");
             streamingIdxRef.current = null;
-            unlisten();
+            if (unlisten) unlisten();
             setTimeout(() => setAiState("waiting_input"), 1500);
           } else if (message.event === "Error") {
             console.error("[Chat] Error:", message.data);
@@ -467,7 +579,7 @@ export default function ChatApp() {
             });
             setAiState("waiting_input");
             streamingIdxRef.current = null;
-            unlisten();
+            if (unlisten) unlisten();
           }
         });
 
@@ -502,6 +614,45 @@ export default function ChatApp() {
     }
   };
 
+  const handleSubmit = async (e) => {
+    e.preventDefault();
+    if (streamingIdxRef.current !== null) return;
+    
+    const text = input.trim();
+    if (!text) return;
+
+    // Reset textarea height
+    const textarea = document.getElementById("chat-input");
+    if (textarea) {
+      textarea.style.height = "38px";
+    }
+
+    setInput("");
+    await submitMessage(text, messages);
+  };
+
+  const startEdit = (idx, text) => {
+    setEditingMsgIdx(idx);
+    setEditInput(text);
+  };
+
+  const handleEditSubmit = (idx) => {
+    if (!editInput.trim()) return;
+    const newText = editInput.trim();
+    setEditingMsgIdx(null);
+    const newHistory = messages.slice(0, idx);
+    submitMessage(newText, newHistory);
+  };
+
+  const handleRetry = (aiIdx) => {
+    if (aiIdx === 0 || streamingIdxRef.current !== null) return;
+    const userMsg = messages[aiIdx - 1];
+    if (!userMsg || userMsg.role !== 'user') return;
+    
+    const newHistory = messages.slice(0, aiIdx - 1);
+    submitMessage(userMsg.text, newHistory);
+  };
+
   const toggleFullscreen = async () => {
     const win = getCurrentWindow();
     const full = !isFullscreen;
@@ -513,9 +664,17 @@ export default function ChatApp() {
     setIsFullscreen(full);
   };
 
-  const toIconMode = () => {
-    setIsFullscreen(false);
-    setMode("widget");
+  const toIconMode = async () => {
+    if (mascotModeAction === "taskbar") {
+      try {
+        await getCurrentWindow().minimize();
+      } catch (e) {
+        console.error(e);
+      }
+    } else {
+      setIsFullscreen(false);
+      setMode("widget");
+    }
   };
 
   const closeApp = async () => {
@@ -526,9 +685,27 @@ export default function ChatApp() {
     }
   };
 
+  const getDerivedAiState = () => {
+    if (aiState !== "generating") return aiState;
+    if (messages.length > 0) {
+      const lastMsg = messages[messages.length - 1];
+      if (lastMsg.role === "ai" && lastMsg.text) {
+        const chunks = parseMessageChunks(lastMsg.text);
+        if (chunks.length > 0) {
+          const lastChunk = chunks[chunks.length - 1];
+          if (lastChunk.type === "think" && !lastChunk.isClosed) {
+            return "thinking";
+          }
+        }
+      }
+    }
+    return "generating";
+  };
+
   const getStatusDotClass = () => {
-    if (aiState === 'waiting_input') return 'waiting';
-    return aiState;
+    const state = getDerivedAiState();
+    if (state === 'waiting_input') return 'waiting';
+    return state;
   };
 
   const openSettings = () => {
@@ -631,24 +808,91 @@ export default function ChatApp() {
             <div id="chat-body" ref={chatAreaRef}>
               {messages.map((msg, idx) => {
                 if (!msg.text && !msg.isError) return null;
-                let textToParse = msg.text || "";
-                // Convert \[ ... \] to $$ ... $$
-                textToParse = textToParse.replace(/\\\[([\s\S]*?)\\\]/g, "$$$$$1$$$$");
-                // Convert \( ... \) to $ ... $
-                textToParse = textToParse.replace(/\\\(([\s\S]*?)\\\)/g, "$$$1$$");
+                const chunks = parseMessageChunks(msg.text || "");
                 
-                const html = DOMPurify.sanitize(marked.parse(textToParse), {
-                  ADD_TAGS: ['math', 'annotation', 'semantics', 'mrow', 'mi', 'mn', 'mo', 'ms', 'mspace', 'mtext', 'menclose', 'merror', 'mfenced', 'mfrac', 'mpadded', 'mphantom', 'mroot', 'msqrt', 'mstyle', 'mmultiscripts', 'mover', 'mprescripts', 'msub', 'msubsup', 'msup', 'munder', 'munderover', 'none', 'annotation-xml'],
-                  ADD_ATTR: ['target', 'class', 'style']
-                });
+                const responseText = chunks.filter(c => c.type === 'text').map(c => c.content).join('').trim();
                 return (
                   <div key={idx} class="msg-wrapper">
-                    <div class={`msg ${msg.role}${msg.isError ? ' error' : ''}`}>
-                      {msg.isError && <AlertTriangle size={14} style={{ flexShrink: 0, marginTop: '1px' }} />}
-                      <div class="markdown-body" dangerouslySetInnerHTML={{ __html: html }} />
-                    </div>
-                    {msg.role === "ai" && showTokenCount && msg.tokens > 0 && (
-                      <div class="token-count">Tokens used: {msg.tokens}</div>
+                    {editingMsgIdx === idx ? (
+                      <div class="edit-mode-container">
+                        <textarea
+                          class="edit-msg-input"
+                          value={editInput}
+                          onInput={(e) => setEditInput(e.target.value)}
+                          onKeyDown={(e) => {
+                            if (e.key === "Enter" && !e.shiftKey) {
+                              e.preventDefault();
+                              handleEditSubmit(idx);
+                            }
+                          }}
+                        />
+                        <div class="edit-actions">
+                          <button type="button" class="edit-btn cancel" onClick={() => setEditingMsgIdx(null)}>Cancel</button>
+                          <button type="button" class="edit-btn submit" onClick={() => handleEditSubmit(idx)}>Submit</button>
+                        </div>
+                      </div>
+                    ) : (
+                      <>
+                          {chunks.map((chunk, cIdx) => {
+                            if (chunk.type === 'think') {
+                              const isLastMsg = idx === messages.length - 1;
+                              const isGenerating = aiState === "generating" || aiState === "thinking";
+                              const showAsStreaming = !chunk.isClosed && isLastMsg && isGenerating;
+                              
+                              if (showAsStreaming) {
+                                const lines = chunk.content.trim().split('\n').filter(l => l.trim());
+                                const lastLine = lines[lines.length - 1] || 'Thinking...';
+                                return (
+                                  <div key={cIdx} class="think-loading-indicator">
+                                    <Loader2 size={14} class="spin-icon" />
+                                    <span class="think-line" style={{ whiteSpace: 'nowrap', overflow: 'hidden', textOverflow: 'ellipsis', flex: 1 }}>{lastLine}</span>
+                                  </div>
+                                );
+                              } else {
+                                const html = DOMPurify.sanitize(marked.parse(preprocessMarkdown(chunk.content)), {
+                                  ADD_TAGS: ['math', 'annotation', 'semantics', 'mrow', 'mi', 'mn', 'mo', 'ms', 'mspace', 'mtext', 'menclose', 'merror', 'mfenced', 'mfrac', 'mpadded', 'mphantom', 'mroot', 'msqrt', 'mstyle', 'mmultiscripts', 'mover', 'mprescripts', 'msub', 'msubsup', 'msup', 'munder', 'munderover', 'none', 'annotation-xml'],
+                                  ADD_ATTR: ['target', 'class', 'style']
+                                });
+                                return (
+                                  <details key={cIdx} class="think-block completed outside-bubble">
+                                    <summary><span class="think-icon"></span>Thought</summary>
+                                    <div class="think-content markdown-body" dangerouslySetInnerHTML={{ __html: html }} />
+                                  </details>
+                                );
+                              }
+                            } else {
+                              const textToParse = preprocessMarkdown(chunk.content);
+                              const html = DOMPurify.sanitize(marked.parse(textToParse), {
+                                ADD_TAGS: ['math', 'annotation', 'semantics', 'mrow', 'mi', 'mn', 'mo', 'ms', 'mspace', 'mtext', 'menclose', 'merror', 'mfenced', 'mfrac', 'mpadded', 'mphantom', 'mroot', 'msqrt', 'mstyle', 'mmultiscripts', 'mover', 'mprescripts', 'msub', 'msubsup', 'msup', 'munder', 'munderover', 'none', 'annotation-xml'],
+                                ADD_ATTR: ['target', 'class', 'style']
+                              });
+                              return (
+                                <div key={cIdx} class={`msg ${msg.role}${msg.isError ? ' error' : ''}`}>
+                                  {msg.isError && cIdx === 0 && <AlertTriangle size={14} style={{ flexShrink: 0, marginTop: '1px' }} />}
+                                  <div class="markdown-body" dangerouslySetInnerHTML={{ __html: html }} />
+                                </div>
+                              );
+                            }
+                          })}
+                        <div class={`msg-actions ${msg.role}`}>
+                          {msg.role === "ai" && showTokenCount && msg.tokens > 0 ? (
+                            <div class="token-count">Tokens used: {msg.tokens}</div>
+                          ) : <div />}
+                          <div class="action-icons">
+                            {msg.role === "user" && (
+                              <button type="button" class="action-btn" title="Edit message" onClick={() => startEdit(idx, msg.text)}>
+                                <Pencil size={13} />
+                              </button>
+                            )}
+                            {msg.role === "ai" && idx > 0 && responseText.length > 0 && (
+                              <button type="button" class="action-btn" title="Retry" onClick={() => handleRetry(idx)} disabled={streamingIdxRef.current !== null}>
+                                <RefreshCw size={13} />
+                              </button>
+                            )}
+                            {msg.role === "ai" && idx > 0 && responseText.length > 0 && <CopyMessageButton text={responseText} />}
+                          </div>
+                        </div>
+                      </>
                     )}
                   </div>
                 );
