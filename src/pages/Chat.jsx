@@ -1,125 +1,13 @@
-import { useState, useEffect, useRef } from "preact/hooks";
+import { useState, useEffect, useRef, useMemo } from "preact/hooks";
 import { getCurrentWindow, LogicalSize, LogicalPosition } from "@tauri-apps/api/window";
 import { listen } from "@tauri-apps/api/event";
 import { invoke } from "@tauri-apps/api/core";
 import { load } from "@tauri-apps/plugin-store";
 import { getApiKey } from "../stronghold";
 import { streamLLM } from "../api/llmClient";
-import { Maximize2, Minimize2, Minus, AlertTriangle, Settings2, Info, PanelLeft, X, Copy, Pencil, Loader2, RefreshCw } from "lucide-preact";
+import { Maximize2, Minimize2, Minus, Settings2, Info, PanelLeft, X } from "lucide-preact";
 import Sidebar from "../components/Sidebar.jsx";
-import { marked } from "marked";
-import DOMPurify from "dompurify";
-import renderMathInElement from "katex/contrib/auto-render";
-import "katex/dist/katex.min.css";
-
-function escapeHtml(text) {
-  return text
-    .replace(/&/g, "&amp;")
-    .replace(/</g, "&lt;")
-    .replace(/>/g, "&gt;")
-    .replace(/"/g, "&quot;")
-    .replace(/'/g, "&#039;");
-}
-
-function parseMessageChunks(text) {
-  const chunks = [];
-  const regex = /<think>([\s\S]*?)(<\/think>|$)/g;
-  let lastIndex = 0;
-  let match;
-  while ((match = regex.exec(text)) !== null) {
-    if (match.index > lastIndex) {
-      chunks.push({ type: 'text', content: text.substring(lastIndex, match.index) });
-    }
-    const isClosed = match[2] === '</think>';
-    chunks.push({ type: 'think', content: match[1], isClosed });
-    lastIndex = regex.lastIndex;
-  }
-  if (lastIndex < text.length) {
-    chunks.push({ type: 'text', content: text.substring(lastIndex) });
-  }
-  // Filter out empty text chunks
-  return chunks.filter(c => c.type === 'think' || c.content.trim() !== '');
-}
-
-function closeOpenDelimiters(text) {
-  const ddMatches = text.match(/\$\$/g) || [];
-  if (ddMatches.length % 2 !== 0) text += '$$';
-  if (text.lastIndexOf('\\[') > text.lastIndexOf('\\]')) text += '\\]';
-  if (text.lastIndexOf('\\(') > text.lastIndexOf('\\)')) text += '\\)';
-  return text;
-}
-
-function parseWithKatex(rawText) {
-  // 1. Close streaming-open delimiters
-  let text = rawText;
-  const codeMatches = text.match(/```/g) || [];
-  if (codeMatches.length % 2 !== 0) {
-    text += '\n```';
-  } else {
-    text = closeOpenDelimiters(text);
-  }
-
-  // 2. Protect math blocks from marked processing
-  //    marked eats \[ → [, turns _ into <em>, * into <strong>, etc.
-  const mathStore = [];
-  const PLACEHOLDER_RE = /MATHPLACEHOLDER(\d+)END/g;
-
-  function storeMath(src) {
-    const key = `MATHPLACEHOLDER${mathStore.length}END`;
-    mathStore.push(src);
-    return key;
-  }
-
-  const mathCharRe = /[\\^_{}=+\-/<>|∑∫α-ωΑ-Ω]|\d/;
-
-  let safeText = text;
-  // Order matters: $$ before $ to avoid splitting display math
-  safeText = safeText.replace(/\$\$([\s\S]*?)\$\$/g, (m) => storeMath(m));
-  safeText = safeText.replace(/\\\[([\s\S]*?)\\\]/g, (m) => storeMath(m));
-  safeText = safeText.replace(/\\\(([^\n]*?)\\\)/g, (m) => storeMath(m));
-  safeText = safeText.replace(/(?<!\$)\$(?!\$)([^\n$]{1,500}?)(?<!\$)\$(?!\$)/g, (m, inner) => {
-    if (!mathCharRe.test(inner)) return m;
-    return storeMath(m);
-  });
-
-  // 3. Marked processes clean markdown (no math chars to mangle)
-  let html = marked.parse(safeText);
-
-  // 4. Restore math originals
-  html = html.replace(PLACEHOLDER_RE, (_, i) => mathStore[parseInt(i)]);
-
-  // 5. katex auto-render per official API (katex.org/docs/autorender)
-  const div = document.createElement('div');
-  div.innerHTML = html;
-  try {
-    renderMathInElement(div, {
-      delimiters: [
-        { left: '$$', right: '$$', display: true },
-        { left: '\\[', right: '\\]', display: true },
-        { left: '\\(', right: '\\)', display: false },
-        { left: '$', right: '$', display: false },
-      ],
-      ignoredTags: ['script', 'noscript', 'style', 'textarea', 'pre', 'code', 'option'],
-      throwOnError: false,
-      errorCallback: () => {},
-    });
-  } catch (e) {}
-  return div.innerHTML;
-}
-
-
-marked.use({
-  renderer: {
-    code(token) {
-      const code = token.text;
-      const lang = token.lang || '';
-      return `<div class="code-block-container">
-        <pre><code class="language-${lang}">${token.escaped ? token.text : escapeHtml(token.text)}</code></pre>
-        <button class="copy-btn" data-code="${encodeURIComponent(code)}" type="button">Copy</button>
-      </div>`;
-    }
-  }
-});
+import MessageItem, { parseMessageChunks } from "../components/MessageItem.jsx";
 
 
 // Assets
@@ -145,27 +33,6 @@ const THINKING_MODELS = new Set([
   "claude-opus-4-5", "claude-sonnet-4-5",
 ]);
 
-const CopyMessageButton = ({ text }) => {
-  const [copied, setCopied] = useState(false);
-  const handleCopy = async (e) => {
-    if (e) {
-      e.stopPropagation();
-      e.preventDefault();
-    }
-    try {
-      await navigator.clipboard.writeText(text);
-      setCopied(true);
-      setTimeout(() => setCopied(false), 2000);
-    } catch (err) {
-      console.error(err);
-    }
-  };
-  return (
-    <button type="button" class="action-btn" title="Copy text" onClick={handleCopy}>
-      {copied ? <span style={{ fontSize: '11px', color: '#8fd6a8', fontWeight: 'bold' }}>Copied!</span> : <Copy size={13} />}
-    </button>
-  );
-};
 
 export default function ChatApp() {
   const [isMobile] = useState(() => (window.__TAURI_INTERNALS__ && ["android", "ios"].includes(window.__TAURI_INTERNALS__.platform)) || navigator.userAgent.includes("Android") || navigator.userAgent.includes("iPhone") || navigator.userAgent.includes("iPad"));
@@ -450,8 +317,21 @@ export default function ChatApp() {
     };
   }, []);
 
+  const derivedAiState = useMemo(() => {
+    if (aiState !== "generating") return aiState;
+    if (messages.length > 0) {
+      const lastMsg = messages[messages.length - 1];
+      if (lastMsg.role === "ai" && lastMsg.text) {
+        if (lastMsg.text.lastIndexOf("<think>") > lastMsg.text.lastIndexOf("</think>")) {
+          return "thinking";
+        }
+      }
+    }
+    return "generating";
+  }, [aiState, messages]);
+
   const renderMascots = (draggable) => {
-    const state = getDerivedAiState();
+    const state = derivedAiState;
     return (
       <>
         <img src={remieWaiting} class={state === "waiting_input" ? "active" : ""} {...(draggable ? {'data-tauri-drag-region': true} : {})} />
@@ -704,25 +584,8 @@ export default function ChatApp() {
     }
   };
 
-  const getDerivedAiState = () => {
-    if (aiState !== "generating") return aiState;
-    if (messages.length > 0) {
-      const lastMsg = messages[messages.length - 1];
-      if (lastMsg.role === "ai" && lastMsg.text) {
-        const chunks = parseMessageChunks(lastMsg.text);
-        if (chunks.length > 0) {
-          const lastChunk = chunks[chunks.length - 1];
-          if (lastChunk.type === "think" && !lastChunk.isClosed) {
-            return "thinking";
-          }
-        }
-      }
-    }
-    return "generating";
-  };
-
   const getStatusDotClass = () => {
-    const state = getDerivedAiState();
+    const state = derivedAiState;
     if (state === 'waiting_input') return 'waiting';
     return state;
   };
@@ -827,92 +690,26 @@ export default function ChatApp() {
             <div id="chat-body" ref={chatAreaRef} onScroll={handleScroll}>
               {messages.map((msg, idx) => {
                 if (!msg.text && !msg.isError) return null;
-                const chunks = parseMessageChunks(msg.text || "");
-                
-                const responseText = chunks.filter(c => c.type === 'text').map(c => c.content).join('').trim();
+                const isLastMsg = idx === messages.length - 1;
+                const isGenerating = aiState === "generating" || aiState === "thinking";
+                const isStreaming = isLastMsg && isGenerating;
+
                 return (
-                  <div key={idx} class="msg-wrapper">
-                    {editingMsgIdx === idx ? (
-                      <div class="edit-mode-container">
-                        <textarea
-                          class="edit-msg-input"
-                          value={editInput}
-                          onInput={(e) => setEditInput(e.target.value)}
-                          onKeyDown={(e) => {
-                            if (e.key === "Enter" && !e.shiftKey) {
-                              e.preventDefault();
-                              handleEditSubmit(idx);
-                            }
-                          }}
-                        />
-                        <div class="edit-actions">
-                          <button type="button" class="edit-btn cancel" onClick={() => setEditingMsgIdx(null)}>Cancel</button>
-                          <button type="button" class="edit-btn submit" onClick={() => handleEditSubmit(idx)}>Submit</button>
-                        </div>
-                      </div>
-                    ) : (
-                      <>
-                          {chunks.map((chunk, cIdx) => {
-                            if (chunk.type === 'think') {
-                              const isLastMsg = idx === messages.length - 1;
-                              const isGenerating = aiState === "generating" || aiState === "thinking";
-                              const showAsStreaming = !chunk.isClosed && isLastMsg && isGenerating;
-                              
-                              if (showAsStreaming) {
-                                const lines = chunk.content.trim().split('\n').filter(l => l.trim());
-                                const lastLine = lines[lines.length - 1] || 'Thinking...';
-                                return (
-                                  <div key={cIdx} class="think-loading-indicator">
-                                    <Loader2 size={14} class="spin-icon" />
-                                    <span class="think-line" style={{ whiteSpace: 'nowrap', overflow: 'hidden', textOverflow: 'ellipsis', flex: 1 }}>{lastLine}</span>
-                                  </div>
-                                );
-                              } else {
-                                const html = DOMPurify.sanitize(parseWithKatex(chunk.content), {
-                                  ADD_TAGS: ['math', 'annotation', 'semantics', 'mrow', 'mi', 'mn', 'mo', 'ms', 'mspace', 'mtext', 'menclose', 'merror', 'mfenced', 'mfrac', 'mpadded', 'mphantom', 'mroot', 'msqrt', 'mstyle', 'mmultiscripts', 'mover', 'mprescripts', 'msub', 'msubsup', 'msup', 'munder', 'munderover', 'none', 'annotation-xml'],
-                                  ADD_ATTR: ['target', 'class', 'style']
-                                });
-                                return (
-                                  <details key={cIdx} class="think-block completed outside-bubble">
-                                    <summary><span class="think-icon"></span>Thought</summary>
-                                    <div class="think-content markdown-body" dangerouslySetInnerHTML={{ __html: html }} />
-                                  </details>
-                                );
-                              }
-                            } else {
-                              const html = DOMPurify.sanitize(parseWithKatex(chunk.content), {
-                                ADD_TAGS: ['math', 'annotation', 'semantics', 'mrow', 'mi', 'mn', 'mo', 'ms', 'mspace', 'mtext', 'menclose', 'merror', 'mfenced', 'mfrac', 'mpadded', 'mphantom', 'mroot', 'msqrt', 'mstyle', 'mmultiscripts', 'mover', 'mprescripts', 'msub', 'msubsup', 'msup', 'munder', 'munderover', 'none', 'annotation-xml'],
-                                ADD_ATTR: ['target', 'class', 'style']
-                              });
-                              return (
-                                <div key={cIdx} class={`msg ${msg.role}${msg.isError ? ' error' : ''}`}>
-                                  {msg.isError && cIdx === 0 && <AlertTriangle size={14} style={{ flexShrink: 0, marginTop: '1px' }} />}
-                                  <div class="markdown-body" dangerouslySetInnerHTML={{ __html: html }} />
-                                </div>
-                              );
-                            }
-                          })}
-                        <div class={`msg-actions ${msg.role}`}>
-                          {msg.role === "ai" && showTokenCount && msg.tokens > 0 ? (
-                            <div class="token-count">Tokens used: {msg.tokens}</div>
-                          ) : <div />}
-                          <div class="action-icons">
-                            {msg.role === "user" && (
-                              <button type="button" class="action-btn" title="Edit message" onClick={() => startEdit(idx, msg.text)}>
-                                <Pencil size={13} />
-                              </button>
-                            )}
-                            {msg.role === "ai" && idx > 0 && responseText.length > 0 && (
-                              <button type="button" class="action-btn" title="Retry" onClick={() => handleRetry(idx)} disabled={streamingIdxRef.current !== null}>
-                                <RefreshCw size={13} />
-                              </button>
-                            )}
-                            {msg.role === "ai" && idx > 0 && responseText.length > 0 && <CopyMessageButton text={responseText} />}
-                          </div>
-                        </div>
-                      </>
-                    )}
-                  </div>
+                  <MessageItem
+                    key={idx}
+                    msg={msg}
+                    idx={idx}
+                    isStreaming={isStreaming}
+                    showTokenCount={showTokenCount}
+                    isEditing={editingMsgIdx === idx}
+                    editInput={editInput}
+                    onEditInput={(e) => setEditInput(e.target.value)}
+                    onEditCancel={() => setEditingMsgIdx(null)}
+                    onEditSubmit={handleEditSubmit}
+                    onStartEdit={startEdit}
+                    onRetry={handleRetry}
+                    disableRetry={streamingIdxRef.current !== null}
+                  />
                 );
               })}
               {(aiState === 'thinking' || aiState === 'generating') && (() => {
