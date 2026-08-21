@@ -384,6 +384,7 @@ export default function ChatApp() {
 
           try { await win.setMinSize(null); } catch(e){}
           try { await win.setResizable(false); } catch(e){}
+          try { await win.setAlwaysOnTop(true); } catch(e){}
           await resizeAnchored(win, 200, 200);
         } else {
           let w = parseInt(localStorage.getItem("remie_chatbox_width")) || 360;
@@ -391,6 +392,7 @@ export default function ChatApp() {
           w = Math.max(w, 280);
           h = Math.max(h, 360);
           try { await win.setMinSize(new LogicalSize(280, 360)); } catch(e){}
+          try { await win.setAlwaysOnTop(false); } catch(e){}
           await resizeAnchored(win, w, h);
           try { await win.setResizable(true); } catch(e){}
         }
